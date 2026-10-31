@@ -232,19 +232,31 @@ export default function App() {
     showToast('Avatar telah dihapus.');
   };
 
-  // Handle Multiplayer Message
+  const activeAvatarRef = useRef(activeAvatar);
+  useEffect(() => {
+    activeAvatarRef.current = activeAvatar;
+  }, [activeAvatar]);
+
+  const soundEnabledRef = useRef(soundEnabled);
+  useEffect(() => {
+    soundEnabledRef.current = soundEnabled;
+  }, [soundEnabled]);
+
+  // Handle Multiplayer Message (Listens for room join, room ready, and game start)
   const handleIncomingWsMessage = useCallback((msg: any) => {
+    if (!msg || typeof msg !== 'object') return;
+
     if (msg.type === 'room-joined') {
       setRoomConnected(true);
       if (msg.role === 'p1') {
         setIsHost(true);
         setRoomStatus('waiting');
-        setP1Info({ name: activeAvatar?.name || 'Pemain 1', avatar: activeAvatar?.emoji || '🐠' });
+        setP1Info({ name: activeAvatarRef.current?.name || 'Pemain 1', avatar: activeAvatarRef.current?.emoji || '🐠' });
       } else {
         setIsHost(false);
         setRoomStatus('ready');
         if (msg.p1) setP1Info(msg.p1);
-        setP2Info({ name: activeAvatar?.name || 'Pemain 2', avatar: activeAvatar?.emoji || '🐬' });
+        setP2Info({ name: activeAvatarRef.current?.name || 'Pemain 2', avatar: activeAvatarRef.current?.emoji || '🐬' });
       }
     } else if (msg.type === 'room-ready') {
       setRoomConnected(true);
@@ -252,16 +264,16 @@ export default function App() {
       if (msg.p1) setP1Info(msg.p1);
       if (msg.p2) setP2Info(msg.p2);
       seaAudio.levelUp();
-    } else if (msg.type === 'game-started') {
+    } else if (msg.type === 'game-started' || msg.type === 'start-game' || msg.type === 'start_game') {
       setCurrentModal(null);
       setCurrentLevel(msg.level || 1);
       setGameMode('multi');
       setCurrentPage('gameplay');
-      if (soundEnabled) seaAudio.startBGM();
+      if (soundEnabledRef.current) seaAudio.startBGM();
     } else {
       setIncomingMultiEvent(msg);
     }
-  }, [activeAvatar, soundEnabled]);
+  }, []);
 
   // Connect to Multiplayer Room (Multi-tier: WebRTC PeerJS + WebSocket + BroadcastChannel)
   const handleJoinOrCreateRoom = (roomId: string, level: number, asHost: boolean) => {
@@ -303,6 +315,10 @@ export default function App() {
   };
 
   const handleStartMultiplayerMatch = () => {
+    broadcastMultiplayerEvent({
+      type: 'game-started',
+      level: currentLevel
+    });
     broadcastMultiplayerEvent({
       type: 'start-game',
       level: currentLevel
