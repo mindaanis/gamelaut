@@ -150,7 +150,7 @@ wss.on('connection', (ws: WebSocket) => {
         }
       }
 
-      if (type === 'start-game' && currentRoomId) {
+      if ((type === 'start-game' || type === 'game-started') && currentRoomId) {
         const room = rooms.get(currentRoomId);
         if (room && (playerSlot === 'p1' || playerSlot === 'p2')) {
           room.status = 'playing';
