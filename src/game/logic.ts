@@ -1,6 +1,7 @@
 /**
  * Pure logic and helpers for Petualangan Pecahan Bawah Laut
  */
+import type { ScoreBreakdown } from '../types/game.ts';
 
 export interface Question {
   id: string;
@@ -41,6 +42,91 @@ export function calculateScore(level: number, isCorrect: boolean): number {
   if (level === 2) return 20;
   if (level === 3) return 30;
   return 10;
+}
+
+/* ═══════════════════════════════════════════════
+   FAIR 3-ASPECT SCORING (max 1000 points per game)
+   - Correct answers : 500 (50%)  → the main skill being tested
+   - Pearls collected: 200 (20%)  → exploration bonus
+   - Time            : 300 (30%)  → only for players who answer ALL questions,
+                                    and multiplied by accuracy so rushing with
+                                    wrong answers is not rewarded
+   ═══════════════════════════════════════════════ */
+export const SCORE_WEIGHTS = { correct: 500, pearls: 200, time: 300 } as const;
+export const MAX_GAME_SCORE = SCORE_WEIGHTS.correct + SCORE_WEIGHTS.pearls + SCORE_WEIGHTS.time;
+
+// Time par per question: at or under FAST → full time bonus, at or over SLOW → no time bonus
+export const TIME_PAR_SECONDS = { fastPerQuestion: 30, slowPerQuestion: 120 } as const;
+
+function correctPoints(correct: number, target: number): number {
+  if (target <= 0) return 0;
+  return Math.round((Math.min(correct, target) / target) * SCORE_WEIGHTS.correct);
+}
+
+function pearlPoints(pearls: number, totalPearls: number): number {
+  if (totalPearls <= 0) return 0;
+  return Math.round((Math.min(pearls, totalPearls) / totalPearls) * SCORE_WEIGHTS.pearls);
+}
+
+/** 1 = finished at/under the fast par, 0 = at/over the slow par (linear in between) */
+export function calculateSpeedRatio(timeMs: number, target: number): number {
+  const fast = TIME_PAR_SECONDS.fastPerQuestion * target;
+  const slow = TIME_PAR_SECONDS.slowPerQuestion * target;
+  const seconds = timeMs / 1000;
+  if (slow <= fast) return 0;
+  return Math.max(0, Math.min(1, (slow - seconds) / (slow - fast)));
+}
+
+/** Score shown while playing (time bonus is only added at the end) */
+export function calculateLiveScore(correct: number, target: number, pearls: number, totalPearls: number): number {
+  return correctPoints(correct, target) + pearlPoints(pearls, totalPearls);
+}
+
+export function calculateFinalScore(params: {
+  correct: number;
+  target: number;
+  pearls: number;
+  totalPearls: number;
+  timeMs: number;
+  finished: boolean;
+}): ScoreBreakdown {
+  const { correct, target, pearls, totalPearls, timeMs, finished } = params;
+  const correctPts = correctPoints(correct, target);
+  const pearlPts = pearlPoints(pearls, totalPearls);
+  const accuracy = target > 0 ? Math.min(correct, target) / target : 0;
+  const timePts = finished ? Math.round(SCORE_WEIGHTS.time * calculateSpeedRatio(timeMs, target) * accuracy) : 0;
+  return { correctPts, pearlPts, timePts, total: correctPts + pearlPts + timePts };
+}
+
+export function formatDuration(ms: number): string {
+  const totalSec = Math.max(0, Math.floor(ms / 1000));
+  const m = Math.floor(totalSec / 60);
+  const s = totalSec % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+/**
+ * Multiplayer verdict using the 3-aspect final score.
+ * Tie-breakers: more correct answers, then faster time (finished players only).
+ */
+export function determineMatchWinner(
+  a: { name: string; score: number; correct: number; timeMs: number; finished: boolean },
+  b: { name: string; score: number; correct: number; timeMs: number; finished: boolean }
+): { winner: 1 | 2 | 0; message: string } {
+  if (a.score !== b.score) {
+    const w = a.score > b.score ? a : b;
+    const l = a.score > b.score ? b : a;
+    return { winner: a.score > b.score ? 1 : 2, message: `${w.name} menang dengan skor ${w.score} vs ${l.score}!` };
+  }
+  if (a.correct !== b.correct) {
+    const w = a.correct > b.correct ? a : b;
+    return { winner: a.correct > b.correct ? 1 : 2, message: `Skor sama! ${w.name} menang karena lebih banyak jawaban benar (${w.correct}).` };
+  }
+  if (a.finished && b.finished && a.timeMs !== b.timeMs) {
+    const w = a.timeMs < b.timeMs ? a : b;
+    return { winner: a.timeMs < b.timeMs ? 1 : 2, message: `Skor & jawaban benar sama! ${w.name} menang karena lebih cepat (${formatDuration(w.timeMs)}).` };
+  }
+  return { winner: 0, message: 'Hasil imbang sama kuat! Luar biasa keduanya!' };
 }
 
 export function calculateStars(score: number, maxScore: number): number {

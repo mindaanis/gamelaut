@@ -53,6 +53,33 @@ export interface PlayerStats {
   wrong: number;
   pearls: number;
   startTime: number;
+  // Filled in when the game ends
+  timeMs?: number;
+  status?: PlayerStatus;
+  breakdown?: ScoreBreakdown;
+}
+
+export type PlayerStatus = 'playing' | 'finished' | 'eliminated' | 'left';
+
+export interface ScoreBreakdown {
+  correctPts: number;
+  pearlPts: number;
+  timePts: number;
+  total: number;
+}
+
+/** A player's result as known on this device (own result or opponent's reported result) */
+export interface PlayerResult {
+  avatarId?: string;
+  name: string;
+  avatar: string;
+  score: number;
+  correct: number;
+  wrong: number;
+  pearls: number;
+  timeMs: number;
+  status: PlayerStatus;
+  breakdown?: ScoreBreakdown;
 }
 
 export interface StationaryBubble {

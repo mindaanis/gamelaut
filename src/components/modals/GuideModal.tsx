@@ -37,14 +37,21 @@ export const GuideModal: React.FC<GuideModalProps> = ({ onClose }) => {
 
           <div className="bg-[#00142e]/80 border border-[#39CCCC]/35 rounded-2xl p-4">
             <h4 className="text-sm font-bold text-[#FFDC00] mb-1">🦪 Mutiara & Ubur-Ubur:</h4>
-            <p>• <strong>🦪 Mutiara:</strong> Ambil kerang mutiara untuk mendapatkan bonus +10 poin!</p>
+            <p>• <strong>🦪 Mutiara:</strong> Ambil kerang mutiara untuk menambah skor mutiara (maks 200 poin)!</p>
             <p className="mt-1">• <strong>🪼 Ubur-ubur Bergerak:</strong> Ubur-ubur berenang berpatroli di perairan. Jika tertabrak, ikanmu akan kesetrum dan kecepatannya berkurang 60% selama 5 detik!</p>
           </div>
 
           <div className="bg-[#00142e]/80 border border-[#39CCCC]/35 rounded-2xl p-4">
             <h4 className="text-sm font-bold text-[#FFDC00] mb-1">⚔️ Single vs Multiplayer Antar-Device:</h4>
             <p>• <strong>Single Player:</strong> Menyelesaikan 5 soal per level secara mandiri.</p>
-            <p className="mt-1">• <strong>Multiplayer:</strong> 2 pemain di perangkat berbeda bergabung via kode Room, berlomba menjawab 15 soal secara bersamaan. Pemain dengan jawaban benar terbanyak dan waktu tercepat keluar sebagai pemenang!</p>
+            <p className="mt-1">• <strong>Multiplayer:</strong> 2 pemain di perangkat berbeda bergabung via kode Room, berlomba menjawab 15 soal secara bersamaan. Jika nyawamu habis, kamu berhenti tetapi lawan tetap bermain sampai selesai. Pemain dengan skor akhir tertinggi menang!</p>
+          </div>
+
+          <div className="bg-[#00142e]/80 border border-[#FFDC00]/40 rounded-2xl p-4">
+            <h4 className="text-sm font-bold text-[#FFDC00] mb-1">🏅 Cara Menghitung Skor (maks 1000):</h4>
+            <p>• <strong>🎯 Jawaban benar — 500 poin:</strong> dibagi rata sesuai jumlah soal.</p>
+            <p className="mt-1">• <strong>🦪 Mutiara — 200 poin:</strong> sesuai jumlah mutiara yang dikumpulkan.</p>
+            <p className="mt-1">• <strong>⏱️ Bonus waktu — 300 poin:</strong> hanya jika semua soal terjawab. Semakin cepat semakin besar, dan dikalikan ketepatan jawaban (jadi menjawab asal-asalan dengan cepat tidak menguntungkan).</p>
           </div>
         </div>
 

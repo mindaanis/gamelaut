@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { seaAudio } from '../../game/audio.ts';
+import { verifyTeacherPassword } from '../../game/teacherAuth.ts';
 
 interface TeacherAuthModalProps {
   onSuccess: () => void;
@@ -13,26 +14,7 @@ export const TeacherAuthModal: React.FC<TeacherAuthModalProps> = ({ onSuccess, o
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
-    const clean = password.trim();
-    const customPwd = localStorage.getItem('pa_teacher_pwd');
-
-    // Valid passwords: custom or standard presets for PGRI & Wonogiri teachers
-    const validPasswords = [
-      'GURUPGRI2026',
-      'guru2026',
-      'PGRI81',
-      'pgri81',
-      'JATIROTO2026',
-      'jatiroto2026',
-      'WONOGIRI',
-      'wonogiri'
-    ];
-
-    if (customPwd) {
-      validPasswords.push(customPwd);
-    }
-
-    if (validPasswords.includes(clean) || (customPwd && clean === customPwd)) {
+    if (verifyTeacherPassword(password)) {
       seaAudio.levelUp();
       onSuccess();
     } else {

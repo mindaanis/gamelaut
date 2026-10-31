@@ -22,8 +22,16 @@ import {
   ActivePage,
   ModalType,
   AvatarProfile,
-  PlayerStats
+  PlayerStats,
+  PlayerResult
 } from './types/game.ts';
+import {
+  MultiResultRow,
+  loadMultiResults,
+  saveMultiResults,
+  mergeMultiResults,
+  resolveMatch
+} from './game/multiplayerLeaderboard.ts';
 import { seaAudio } from './game/audio.ts';
 
 import { multiplayerNet } from './game/multiplayerNetwork.ts';
@@ -127,6 +135,26 @@ export default function App() {
   const [finalP1, setFinalP1] = useState<PlayerStats | null>(null);
   const [finalP2, setFinalP2] = useState<PlayerStats | null>(null);
   const [isGameOver, setIsGameOver] = useState<boolean>(false);
+
+  // Multiplayer match tracking (opponent may still be playing after we finish)
+  const [matchId, setMatchId] = useState<string | null>(null);
+  const [opponentResult, setOpponentResult] = useState<PlayerResult | null>(null);
+  const [multiResults, setMultiResults] = useState<MultiResultRow[]>(() => loadMultiResults());
+
+  const [leaderboardMode, setLeaderboardMode] = useState<'single' | 'multi'>('single');
+
+  // Only calls state setters, so it is safe to use from the stable network callback
+  const resetMatchState = () => {
+    setFinalP1(null);
+    setFinalP2(null);
+    setIsGameOver(false);
+    setOpponentResult(null);
+  };
+
+  const updateMultiResults = (next: MultiResultRow[]) => {
+    setMultiResults(next);
+    saveMultiResults(next);
+  };
 
   // Multiplayer State (P2P Cloud + WebSockets + BroadcastChannel)
   const [networkMessage, setNetworkMessage] = useState<string>('Jaringan WebRTC P2P Siap');
@@ -294,6 +322,8 @@ export default function App() {
       applyRoomPlayers(msg);
       seaAudio.levelUp();
     } else if (msg.type === 'game-started' || msg.type === 'start-game' || msg.type === 'start_game') {
+      if (msg.matchId) setMatchId(msg.matchId);
+      resetMatchState();
       setCurrentModal(null);
       setCurrentLevel(msg.level || 1);
       setGameMode('multi');
@@ -303,6 +333,104 @@ export default function App() {
       multiListenersRef.current.forEach((handler) => handler(msg));
     }
   }, []);
+
+  // Track the opponent's progress for the results screen. This keeps running after our own
+  // game ended (e.g. we ran out of hearts) so we see their final result when they finish.
+  useEffect(() => {
+    if (gameMode !== 'multi') return;
+    const num = (v: any, fallback: number) => (typeof v === 'number' ? v : fallback);
+    const empty: PlayerResult = { name: '', avatar: '', score: 0, correct: 0, wrong: 0, pearls: 0, timeMs: 0, status: 'playing' };
+
+    return subscribeMultiplayerEvents((msg: any) => {
+      if (msg.type === 'answer-submitted' || msg.type === 'pearl-collected') {
+        setOpponentResult((prev) => {
+          if (prev && prev.status !== 'playing') return prev;
+          const base = prev || empty;
+          return {
+            ...base,
+            score: num(msg.score, base.score),
+            correct: num(msg.correct, base.correct),
+            wrong: num(msg.wrong, base.wrong),
+            pearls: num(msg.pearls, base.pearls)
+          };
+        });
+      } else if (msg.type === 'player-finished') {
+        setOpponentResult({
+          avatarId: msg.avatarId,
+          name: msg.name || '',
+          avatar: msg.avatar || '',
+          score: num(msg.score, 0),
+          correct: num(msg.correct, 0),
+          wrong: num(msg.wrong, 0),
+          pearls: num(msg.pearls, 0),
+          timeMs: num(msg.timeMs, 0),
+          status: msg.status === 'eliminated' ? 'eliminated' : 'finished',
+          breakdown: msg.breakdown
+        });
+      } else if (msg.type === 'opponent-left') {
+        setOpponentResult((prev) => (prev && prev.status !== 'playing' ? prev : { ...(prev || empty), status: 'left' }));
+      }
+    });
+  }, [gameMode, subscribeMultiplayerEvents]);
+
+  // Opponent info as known from the room, merged with their reported progress
+  const opponentInfo = isHost ? p2Info : p1Info;
+  const opponentDisplay: PlayerResult = {
+    ...(opponentResult || { score: 0, correct: 0, wrong: 0, pearls: 0, timeMs: 0, status: 'playing' as const }),
+    name: opponentResult?.name || opponentInfo.name,
+    avatar: opponentResult?.avatar || opponentInfo.avatar
+  };
+
+  // Record the match in the multiplayer leaderboard once both results are known (once per match)
+  const recordedMatchesRef = useRef(new Set<string>());
+  useEffect(() => {
+    if (gameMode !== 'multi' || !matchId || !finalP1 || !opponentResult || opponentResult.status === 'playing') return;
+    if (recordedMatchesRef.current.has(matchId)) return;
+    recordedMatchesRef.current.add(matchId);
+
+    const me: PlayerResult = {
+      avatarId: activeAvatar?.id,
+      name: finalP1.name,
+      avatar: finalP1.avatar,
+      score: finalP1.score,
+      correct: finalP1.correct,
+      wrong: finalP1.wrong,
+      pearls: finalP1.pearls,
+      timeMs: finalP1.timeMs || 0,
+      status: finalP1.status || (isGameOver ? 'eliminated' : 'finished')
+    };
+    const verdict = resolveMatch(me, opponentDisplay);
+    const date = new Date().toISOString();
+    const toRow = (p: PlayerResult, outcome: MultiResultRow['outcome'], opponentName: string): MultiResultRow => ({
+      matchId,
+      playerKey: p.avatarId || p.name,
+      name: p.name,
+      avatar: p.avatar,
+      level: currentLevel,
+      score: p.score,
+      correct: p.correct,
+      wrong: p.wrong,
+      pearls: p.pearls,
+      timeMs: p.timeMs,
+      status: p.status,
+      outcome,
+      opponentName,
+      date
+    });
+    const rows = [
+      toRow(me, verdict.winner === 1 ? 'menang' : verdict.winner === 2 ? 'kalah' : 'seri', opponentDisplay.name),
+      toRow(opponentDisplay, verdict.winner === 2 ? 'menang' : verdict.winner === 1 ? 'kalah' : 'seri', me.name)
+    ];
+    setMultiResults((prev) => {
+      const next = mergeMultiResults(prev, rows);
+      saveMultiResults(next);
+      return next;
+    });
+
+    if (currentPage !== 'results') {
+      showToast(`Pertandingan selesai: ${verdict.message}`);
+    }
+  }, [gameMode, matchId, finalP1, opponentResult]);
 
   // Connect to Multiplayer Room (Multi-tier: WebRTC PeerJS + WebSocket + BroadcastChannel)
   const handleJoinOrCreateRoom = (roomId: string, level: number, asHost: boolean) => {
@@ -347,13 +475,18 @@ export default function App() {
   };
 
   const handleStartMultiplayerMatch = () => {
+    const newMatchId = `${currentRoomId}-${Date.now()}`;
+    setMatchId(newMatchId);
+    resetMatchState();
     broadcastMultiplayerEvent({
       type: 'game-started',
-      level: currentLevel
+      level: currentLevel,
+      matchId: newMatchId
     });
     broadcastMultiplayerEvent({
       type: 'start-game',
-      level: currentLevel
+      level: currentLevel,
+      matchId: newMatchId
     });
     setCurrentModal(null);
     setGameMode('multi');
@@ -371,10 +504,18 @@ export default function App() {
 
   // When game completes (accumulates points & mutiara to active avatar)
   const handleFinishGame = (p1Stats: PlayerStats, p2Stats: PlayerStats, gameOverState?: boolean) => {
-    setFinalP1(p1Stats);
-    setFinalP2(p2Stats);
+    // Copy: the gameplay refs are mutable objects
+    setFinalP1({ ...p1Stats });
+    setFinalP2({ ...p2Stats });
     setIsGameOver(!!gameOverState);
     seaAudio.stopBGM();
+
+    // Multiplayer results go to the separate multiplayer leaderboard (recorded once
+    // the opponent's final result is known), not to the single-player avatar stats.
+    if (gameMode === 'multi') {
+      setCurrentPage('results');
+      return;
+    }
 
     // If game over, DO NOT RECORD to leaderboard or avatar (Sesuai Permintaan: peringkat tidak dicatat)
     if (!gameOverState && activeAvatar) {
@@ -501,6 +642,7 @@ export default function App() {
           gameMode={gameMode}
           currentLevel={currentLevel}
           playerAvatar={{
+            id: activeAvatar?.id,
             name: activeAvatar?.name || 'Penyelam',
             emoji: activeAvatar?.emoji || '🐠',
             color: activeAvatar?.color || 'blue'
@@ -523,13 +665,16 @@ export default function App() {
           gameMode={gameMode}
           currentLevel={currentLevel}
           p1={finalP1}
-          p2={finalP2 || finalP1}
+          opponent={gameMode === 'multi' ? opponentDisplay : undefined}
           isGameOver={isGameOver}
           onPlayAgain={() => {
+            // Single player only — a multiplayer match cannot be replayed in the same session
+            if (gameMode === 'multi') return;
             setCurrentPage('gameplay');
             if (soundEnabled) seaAudio.startBGM();
           }}
           onViewLeaderboard={() => {
+            setLeaderboardMode(gameMode);
             setCurrentModal('leaderboard');
           }}
           onHome={() => {
@@ -609,6 +754,7 @@ export default function App() {
             setActiveAvatarId(null);
             setUnlockedLevels([1]);
             setQuestions(DEFAULT_QUESTIONS);
+            setMultiResults([]);
             setCurrentModal(null);
             showToast('Semua data berhasil direset.');
           }}
@@ -641,6 +787,7 @@ export default function App() {
       {/* Leaderboard Modal (Unique Avatars with Filters: Juara Umum, Zona 1, Zona 2, Zona 3) */}
       {currentModal === 'leaderboard' && (
         <LeaderboardModal
+          initialMode={leaderboardMode}
           avatars={avatars}
           onImportAvatars={(imported) => {
             setAvatars(imported);
@@ -650,7 +797,27 @@ export default function App() {
               saveStorage(STORAGE_KEYS.ACTIVE_AVATAR_ID, imported[0].id);
             }
           }}
-          onClose={() => setCurrentModal(null)}
+          onDeleteAvatar={handleDeleteAvatar}
+          onResetAllScores={() => {
+            const reset = avatars.map((a) => ({
+              ...a,
+              totalScore: 0,
+              totalPearls: 0,
+              totalCorrect: 0,
+              totalWrong: 0,
+              gamesPlayed: 0,
+              playedZones: [],
+              zoneScores: { 1: 0, 2: 0, 3: 0 }
+            }));
+            setAvatars(reset);
+            saveStorage(STORAGE_KEYS.AVATARS_LIST, reset);
+          }}
+          multiResults={multiResults}
+          onMultiResultsChange={updateMultiResults}
+          onClose={() => {
+            setLeaderboardMode('single');
+            setCurrentModal(null);
+          }}
         />
       )}
 

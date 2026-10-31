@@ -12,20 +12,29 @@ import {
 } from '../game/constants.ts';
 import {
   PlayerStats,
+  PlayerStatus,
   StationaryBubble,
   PearlItem,
   MovingJellyfish,
   AmbientFish
 } from '../types/game.ts';
-import { Question, checkCollision } from '../game/logic.ts';
+import {
+  Question,
+  checkCollision,
+  calculateLiveScore,
+  calculateFinalScore,
+  formatDuration
+} from '../game/logic.ts';
 import { seaAudio } from '../game/audio.ts';
 import { QuestionModal } from '../components/modals/QuestionModal.tsx';
 import { OceanScenery } from '../components/OceanScenery.tsx';
 
+const TOTAL_PEARLS = ORGANIC_PEARL_COORDS.length;
+
 interface GameplayPageProps {
   gameMode: 'single' | 'multi';
   currentLevel: number;
-  playerAvatar: { name: string; emoji: string; color?: string };
+  playerAvatar: { id?: string; name: string; emoji: string; color?: string };
   p2Profile?: { name: string; avatar: string; color?: string };
   questions: Question[];
   onExitGame: () => void;
@@ -209,6 +218,22 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
   });
 
   const [hudScores, setHudScores] = useState({ p1: 0, p2: 0 });
+
+  // Game end guard (finish / game over can only happen once per round)
+  const endedRef = useRef(false);
+
+  // Multiplayer: opponent progress (they may finish or be eliminated before us)
+  const [opponentStatus, setOpponentStatus] = useState<PlayerStatus>('playing');
+  const [opponentNotice, setOpponentNotice] = useState<string | null>(null);
+  const noticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const showOpponentNotice = (text: string) => {
+    setOpponentNotice(text);
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+    noticeTimerRef.current = setTimeout(() => setOpponentNotice(null), 5000);
+  };
+  useEffect(() => () => {
+    if (noticeTimerRef.current) clearTimeout(noticeTimerRef.current);
+  }, []);
   const [answeredCount, setAnsweredCount] = useState(0);
   const answeredCountRef = useRef(0);
   answeredCountRef.current = answeredCount;
@@ -339,13 +364,21 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
     p1Ref.current.isShocked = false;
     p1Ref.current.speed = p1Ref.current.baseSpeed;
     p1Ref.current.facingRight = true;
+    p1Ref.current.startTime = Date.now();
+    p1Ref.current.status = 'playing';
+    p1Ref.current.timeMs = undefined;
+    p1Ref.current.breakdown = undefined;
+    endedRef.current = false;
 
     p2Ref.current.x = 280;
     p2Ref.current.y = 200;
     p2Ref.current.score = 0;
     p2Ref.current.correct = 0;
     p2Ref.current.wrong = 0;
+    p2Ref.current.pearls = 0;
     p2Ref.current.facingRight = false;
+    p2Ref.current.status = 'playing';
+    setOpponentStatus('playing');
 
     setLives(3);
     setHudScores({ p1: 0, p2: 0 });
@@ -416,8 +449,26 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
           bubble.active = false;
           setBubbles([...bubblesRef.current]);
         }
-      } else if (msg.type === 'match-ended') {
-        onFinishGameRef.current(p1Ref.current, p2Ref.current, false);
+      } else if (msg.type === 'player-finished') {
+        // Opponent is done (finished all questions or ran out of hearts) — we keep playing
+        if (typeof msg.score === 'number') p2.score = msg.score;
+        if (typeof msg.correct === 'number') p2.correct = msg.correct;
+        if (typeof msg.wrong === 'number') p2.wrong = msg.wrong;
+        const status = msg.status === 'eliminated' ? 'eliminated' : 'finished';
+        p2.status = status;
+        setOpponentStatus(status);
+        setHudScores({ p1: p1Ref.current.score, p2: p2.score });
+        showOpponentNotice(
+          status === 'eliminated'
+            ? `💀 ${p2.name} kehabisan nyawa! Lanjutkan sampai selesai untuk bonus waktu.`
+            : `🏁 ${p2.name} sudah menyelesaikan semua soal! Ayo selesaikan juga!`
+        );
+      } else if (msg.type === 'opponent-left') {
+        if (p2.status !== 'finished' && p2.status !== 'eliminated') {
+          p2.status = 'left';
+          setOpponentStatus('left');
+          showOpponentNotice(`🚪 ${p2.name} keluar dari permainan.`);
+        }
       }
     });
   }, [gameMode, subscribeMultiplayerEvents]);
@@ -435,18 +486,53 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
     }, 5000);
   }, []);
 
-  // Trigger Game Over when lives reach 0
-  const handleTriggerGameOver = useCallback(() => {
-    seaAudio.gameOver();
+  // End this player's game exactly once: compute the 3-aspect final score,
+  // tell the opponent (multiplayer), then show the results.
+  const finishGame = (eliminated: boolean, endedAt: number) => {
+    if (endedRef.current) return;
+    endedRef.current = true;
     if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
-    onFinishGame(p1Ref.current, p2Ref.current, true);
-  }, [onFinishGame]);
+
+    const p1 = p1Ref.current;
+    const timeMs = endedAt - p1.startTime;
+    const breakdown = calculateFinalScore({
+      correct: p1.correct,
+      target: targetCount,
+      pearls: p1.pearls,
+      totalPearls: TOTAL_PEARLS,
+      timeMs,
+      finished: !eliminated
+    });
+    p1.score = breakdown.total;
+    p1.timeMs = timeMs;
+    p1.status = eliminated ? 'eliminated' : 'finished';
+    p1.breakdown = breakdown;
+
+    if (gameMode === 'multi' && broadcastEvent) {
+      broadcastEvent({
+        type: 'player-finished',
+        status: p1.status,
+        avatarId: playerAvatar.id,
+        name: p1.name,
+        avatar: p1.avatar,
+        score: p1.score,
+        correct: p1.correct,
+        wrong: p1.wrong,
+        pearls: p1.pearls,
+        timeMs,
+        breakdown
+      });
+    }
+
+    onFinishGameRef.current(p1, p2Ref.current, eliminated);
+  };
 
   // Handle Answer Submitted from Question Modal
-  const handleAnswerSubmitted = (isCorrect: boolean, points: number) => {
+  const handleAnswerSubmitted = (isCorrect: boolean, _points: number) => {
+    if (endedRef.current) return;
+    const answeredAt = Date.now();
     const p1 = p1Ref.current;
     if (isCorrect) {
-      p1.score += points;
       p1.correct += 1;
     } else {
       p1.wrong += 1;
@@ -455,25 +541,27 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
       livesRef.current = nextLives;
 
       if (nextLives <= 0) {
-        // Nyawa habis -> Game Over!
+        // Nyawa habis -> Game Over! (multiplayer: the opponent keeps playing)
         setTimeout(() => {
           setActiveQuestion(null);
-          handleTriggerGameOver();
+          seaAudio.gameOver();
+          finishGame(true, answeredAt);
         }, 1200);
         return;
       }
     }
 
+    p1.score = calculateLiveScore(p1.correct, targetCount, p1.pearls, TOTAL_PEARLS);
     setHudScores({ p1: p1.score, p2: p2Ref.current.score });
 
     if (gameMode === 'multi' && broadcastEvent) {
       broadcastEvent({
         type: 'answer-submitted',
         isCorrect,
-        points,
         score: p1.score,
         correct: p1.correct,
-        wrong: p1.wrong
+        wrong: p1.wrong,
+        pearls: p1.pearls
       });
     }
 
@@ -481,12 +569,12 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
     setAnsweredCount(nextCount);
     answeredCountRef.current = nextCount;
 
-    // Check if target questions are met
+    // Check if target questions are met (time stops at the last answer)
     if (nextCount >= targetCount) {
       setTimeout(() => {
         setActiveQuestion(null);
         seaAudio.levelUp();
-        onFinishGame(p1Ref.current, p2Ref.current, false);
+        finishGame(false, answeredAt);
       }, 1500);
     }
   };
@@ -496,6 +584,7 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
     let lastBroadcastTime = 0;
 
     const loop = (timestamp: number) => {
+      if (endedRef.current) return;
       const p1 = p1Ref.current;
       const keys = keysDownRef.current;
 
@@ -574,8 +663,8 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
         pearlsRef.current.forEach(pearl => {
           if (pearl.active && checkCollision(p1, pearl)) {
             pearl.active = false;
-            p1.score += 10;
             p1.pearls++;
+            p1.score = calculateLiveScore(p1.correct, targetCount, p1.pearls, TOTAL_PEARLS);
             seaAudio.pearlDing();
             setHudScores({ p1: p1.score, p2: p2Ref.current.score });
             setPearls([...pearlsRef.current]);
@@ -709,8 +798,14 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
           </div>
 
           {gameMode === 'multi' && (
-            <div className="flex items-center gap-1 text-[#39CCCC] shrink-0" title={`Skor ${p2.name}`}>
-              <span className="max-w-[70px] sm:max-w-[110px] truncate">{p2.avatar}<span className="hidden md:inline"> {p2.name}</span></span>
+            <div
+              className={`flex items-center gap-1 shrink-0 ${opponentStatus === 'playing' ? 'text-[#39CCCC]' : 'text-white/50'}`}
+              title={`Skor ${p2.name}${opponentStatus === 'finished' ? ' (selesai)' : opponentStatus === 'eliminated' ? ' (nyawa habis)' : opponentStatus === 'left' ? ' (keluar)' : ''}`}
+            >
+              <span className="max-w-[70px] sm:max-w-[110px] truncate">
+                {opponentStatus === 'finished' ? '🏁' : opponentStatus === 'eliminated' ? '💀' : opponentStatus === 'left' ? '🚪' : p2.avatar}
+                <span className="hidden md:inline"> {p2.name}</span>
+              </span>
               <span className="text-sm sm:text-base font-black tabular-nums">{hudScores.p2}</span>
             </div>
           )}
@@ -718,6 +813,11 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
           {/* Counter */}
           <div className="text-[#b8d4f0] text-[11px] sm:text-xs shrink-0 tabular-nums" title="Soal terjawab">
             ❓{answeredCount}/{targetCount}
+          </div>
+
+          {/* Timer (part of the final score) */}
+          <div className="text-white text-[11px] sm:text-xs shrink-0 tabular-nums font-black" title="Waktu bermain — semakin cepat menyelesaikan semua soal, semakin besar bonus waktu">
+            ⏱️{formatDuration(Date.now() - p1.startTime)}
           </div>
 
           {/* Fullscreen & Rotate Button (Great for mobile & tablets) */}
@@ -777,6 +877,13 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
             <span>🗺️</span>
             <span>Jelajahi samudra luas! Berenang cari Gelembung Soal (❓) dan kumpulkan Mutiara (🦪)!</span>
           </p>
+        </div>
+      )}
+
+      {/* Multiplayer: opponent finished / eliminated / left notice */}
+      {opponentNotice && (
+        <div className="absolute top-14 sm:top-16 short:top-12 left-1/2 -translate-x-1/2 z-40 max-w-lg w-[calc(100%-1rem)] sm:w-[90%] px-3 sm:px-4 py-2 rounded-2xl bg-[#2a1240]/95 border-2 border-[#39CCCC] text-center shadow-2xl backdrop-blur-md animate-fadeIn pointer-events-none">
+          <p className="text-[11px] sm:text-sm font-bold text-white">{opponentNotice}</p>
         </div>
       )}
 
@@ -1093,9 +1200,9 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
               ═══════════════════════════════════════════════ */}
           {gameMode === 'multi' && (
             <div
-              className={`absolute flex flex-col items-center justify-center pointer-events-none drop-shadow-xl z-20 ${
+              className={`absolute flex flex-col items-center justify-center pointer-events-none drop-shadow-xl z-20 transition-opacity ${
                 p2.isShocked ? 'shocked-avatar-filter animate-shock-shake' : ''
-              }`}
+              } ${opponentStatus !== 'playing' ? 'opacity-40 grayscale' : ''}`}
               style={{
                 left: `${p2.x}px`,
                 top: `${p2.y}px`,

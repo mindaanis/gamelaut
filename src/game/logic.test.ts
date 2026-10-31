@@ -162,3 +162,76 @@ test('leaderboard ranking comparator: score first, then pearls tie-breaker, then
   assert.equal(isAvatarEligibleForTab(yuyu, 'zone2'), true);
 });
 
+
+test('3-aspect scoring: correct 500, pearls 200, time 300 (max 1000)', async () => {
+  const { calculateFinalScore, calculateLiveScore, MAX_GAME_SCORE } = await import('./logic.ts');
+  assert.equal(MAX_GAME_SCORE, 1000);
+
+  // Perfect & fast: everything maxed
+  const perfect = calculateFinalScore({ correct: 15, target: 15, pearls: 16, totalPearls: 16, timeMs: 5 * 60_000, finished: true });
+  assert.deepEqual(perfect, { correctPts: 500, pearlPts: 200, timePts: 300, total: 1000 });
+
+  // Live score has no time bonus
+  assert.equal(calculateLiveScore(15, 15, 16, 16), 700);
+
+  // Eliminated players get no time bonus
+  const eliminated = calculateFinalScore({ correct: 5, target: 15, pearls: 8, totalPearls: 16, timeMs: 60_000, finished: false });
+  assert.equal(eliminated.timePts, 0);
+  assert.equal(eliminated.total, 167 + 100);
+
+  // Too slow (>= 120s per question) -> no time bonus
+  const slow = calculateFinalScore({ correct: 15, target: 15, pearls: 0, totalPearls: 16, timeMs: 15 * 120_000, finished: true });
+  assert.equal(slow.timePts, 0);
+
+  // Rushing with wrong answers is not rewarded: time bonus scales with accuracy
+  const rushed = calculateFinalScore({ correct: 3, target: 15, pearls: 0, totalPearls: 16, timeMs: 60_000, finished: true });
+  assert.equal(rushed.timePts, 60);
+});
+
+test('screenshot scenario: 11 correct finisher beats 5 correct + many pearls', async () => {
+  const { calculateFinalScore, determineMatchWinner } = await import('./logic.ts');
+  const jojo = calculateFinalScore({ correct: 5, target: 15, pearls: 8, totalPearls: 16, timeMs: 6 * 60_000, finished: false });
+  const dimas = calculateFinalScore({ correct: 11, target: 15, pearls: 2, totalPearls: 16, timeMs: 12 * 60_000, finished: true });
+  assert.ok(dimas.total > jojo.total);
+  const res = determineMatchWinner(
+    { name: 'jojo', score: jojo.total, correct: 5, timeMs: 6 * 60_000, finished: false },
+    { name: 'Dimas', score: dimas.total, correct: 11, timeMs: 12 * 60_000, finished: true }
+  );
+  assert.equal(res.winner, 2);
+});
+
+test('match winner tie-breakers: score, then correct, then time', async () => {
+  const { determineMatchWinner } = await import('./logic.ts');
+  const base = { score: 600, correct: 10, timeMs: 400_000, finished: true };
+  assert.equal(determineMatchWinner({ name: 'A', ...base, score: 610 }, { name: 'B', ...base }).winner, 1);
+  assert.equal(determineMatchWinner({ name: 'A', ...base }, { name: 'B', ...base, correct: 11 }).winner, 2);
+  assert.equal(determineMatchWinner({ name: 'A', ...base, timeMs: 300_000 }, { name: 'B', ...base }).winner, 1);
+  assert.equal(determineMatchWinner({ name: 'A', ...base }, { name: 'B', ...base }).winner, 0);
+});
+
+test('multiplayer leaderboard: merge dedupes, summary ranks by best score, CSV roundtrip', async () => {
+  const lb = await import('./multiplayerLeaderboard.ts');
+  const row = (matchId: string, playerKey: string, score: number, outcome: 'menang' | 'kalah' | 'seri') => ({
+    matchId, playerKey, name: playerKey, avatar: '🐠', level: 1, score, correct: 10, wrong: 1, pearls: 3,
+    timeMs: 300_000, status: 'finished' as const, outcome, opponentName: 'x', date: '2026-10-31T10:00:00.000Z'
+  });
+  const rows = [row('m1', 'ana', 800, 'menang'), row('m1', 'budi', 500, 'kalah'), row('m2', 'budi', 900, 'menang')];
+  const merged = lb.mergeMultiResults(rows, [row('m1', 'ana', 800, 'menang'), row('m3', 'citra', 100, 'kalah')]);
+  assert.equal(merged.length, 4);
+
+  const summary = lb.summarizePlayers(merged);
+  assert.deepEqual(summary.map((s) => s.playerKey), ['budi', 'ana', 'citra']);
+  assert.equal(summary[0].matches, 2);
+  assert.equal(summary[0].wins, 1);
+
+  const parsed = lb.parseMultiResultsCSV(lb.exportMultiResultsToCSV(merged));
+  assert.equal(parsed.error, undefined);
+  assert.deepEqual(parsed.rows, merged);
+
+  // A player who leaves loses
+  const left = lb.resolveMatch(
+    { name: 'A', avatar: '🐠', score: 900, correct: 14, wrong: 0, pearls: 5, timeMs: 0, status: 'left' },
+    { name: 'B', avatar: '🐬', score: 100, correct: 2, wrong: 3, pearls: 0, timeMs: 0, status: 'eliminated' }
+  );
+  assert.equal(left.winner, 2);
+});

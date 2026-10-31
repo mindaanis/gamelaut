@@ -162,6 +162,7 @@ wss.on('connection', (ws: WebSocket) => {
           broadcastToRoom(room, {
             type: 'game-started',
             level: room.level,
+            matchId: msg.matchId,
             p1: publicPlayer(room.p1),
             p2: publicPlayer(room.p2)
           });
@@ -170,7 +171,7 @@ wss.on('connection', (ws: WebSocket) => {
 
       // Relay live gameplay events to the opponent unchanged (keeps _mid so clients
       // can de-duplicate against the same message arriving over WebRTC)
-      if ((type === 'player-pos' || type === 'answer-submitted' || type === 'pearl-collected') && currentRoomId) {
+      if ((type === 'player-pos' || type === 'answer-submitted' || type === 'pearl-collected' || type === 'player-finished') && currentRoomId) {
         const room = rooms.get(currentRoomId);
         if (room) {
           broadcastToRoom(room, msg, ws);
