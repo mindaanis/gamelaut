@@ -20,6 +20,7 @@ import {
 import { Question, checkCollision } from '../game/logic.ts';
 import { seaAudio } from '../game/audio.ts';
 import { QuestionModal } from '../components/modals/QuestionModal.tsx';
+import { OceanScenery } from '../components/OceanScenery.tsx';
 
 interface GameplayPageProps {
   gameMode: 'single' | 'multi';
@@ -555,8 +556,10 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
       });
 
       // 3. Update Moving Ambient Small Fishes (Continuous swimming)
-      ambientFishesRef.current.forEach(fish => {
+      ambientFishesRef.current.forEach((fish, i) => {
         fish.x += fish.vx;
+        // Gentle up/down drift so fish swim in natural waves instead of straight lines
+        fish.y += Math.sin(timestamp / 650 + i * 1.7) * 0.35;
         if (fish.vx > 0 && fish.x > WORLD_WIDTH + 80) {
           fish.x = -80;
           fish.y = Math.random() * (WORLD_HEIGHT - 200) + 100;
@@ -659,36 +662,39 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
   const p2 = p2Ref.current;
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden select-none bg-[#001020]">
+    <div className="relative w-full h-[100dvh] overflow-hidden select-none bg-[#001020]">
       {/* ═══════════════════════════════════════════════
-          TOP HUD NAVIGATION & STATS
+          TOP HUD NAVIGATION & STATS (single compact row on every screen)
           ═══════════════════════════════════════════════ */}
-      <div className="absolute top-3 left-3 right-3 z-40 flex flex-wrap items-center justify-between gap-3 px-5 py-2.5 rounded-2xl bg-[#00142e]/92 border-[1.5px] border-[#39CCCC]/40 shadow-2xl backdrop-blur-md">
-        <div className="flex items-center gap-3">
+      <div
+        className="absolute left-2 right-2 sm:left-3 sm:right-3 z-40 flex flex-nowrap items-center justify-between gap-2 sm:gap-3 px-2 sm:px-4 py-1.5 sm:py-2 short:py-1 rounded-2xl bg-[#00142e]/90 border-[1.5px] border-[#39CCCC]/40 shadow-2xl backdrop-blur-md"
+        style={{ top: 'max(8px, env(safe-area-inset-top))' }}
+      >
+        <div className="flex items-center gap-1.5 sm:gap-2.5 min-w-0">
           {/* Custom In-Game Exit Button (No window.confirm!) */}
           <button
             onClick={() => {
               seaAudio.klik();
               setShowExitConfirm(true);
             }}
-            className="px-3.5 py-1.5 rounded-xl bg-white/10 hover:bg-rose-600/30 border border-white/25 hover:border-rose-400 text-xs font-bold text-white transition-all cursor-pointer flex items-center gap-1.5"
+            className="h-8 px-2.5 sm:px-3 rounded-xl bg-white/10 hover:bg-rose-600/30 border border-white/25 hover:border-rose-400 text-xs font-bold text-white transition-all cursor-pointer flex items-center gap-1.5 shrink-0"
             title="Keluar ke Menu Utama"
+            aria-label="Keluar ke Menu Utama"
           >
             <span>✕</span>
-            <span>Keluar</span>
+            <span className="hidden sm:inline">Keluar</span>
           </button>
-          <span className="px-2.5 py-1 rounded-full text-[11px] font-black uppercase tracking-wider bg-[#FFDC00]/20 text-[#FFDC00] border border-[#FFDC00]/50">
-            ZONA {currentLevel}
+          <span className="shrink-0 px-2 py-1 rounded-full text-[10px] sm:text-[11px] font-black uppercase tracking-wider bg-[#FFDC00]/20 text-[#FFDC00] border border-[#FFDC00]/50">
+            Z{currentLevel}<span className="hidden sm:inline">ONA</span>
+          </span>
+          <span className="hidden lg:block truncate text-sm font-extrabold text-[#FFDC00] drop-shadow-sm">
+            {zoneConfig.name}
           </span>
         </div>
 
-        <div className="text-sm md:text-base font-extrabold text-[#FFDC00] drop-shadow-sm flex items-center gap-2">
-          {zoneConfig.name}
-        </div>
-
-        <div className="flex items-center gap-4 text-xs md:text-sm font-bold">
+        <div className="flex items-center gap-2 sm:gap-3.5 text-xs sm:text-sm font-bold min-w-0">
           {/* Lives (3 Hearts) */}
-          <div className="flex items-center gap-1 text-base" title="Nyawa Tersisa">
+          <div className="flex items-center gap-0.5 text-sm sm:text-base shrink-0" title="Nyawa Tersisa" aria-label={`Nyawa ${lives} dari 3`}>
             {Array.from({ length: 3 }).map((_, i) => (
               <span key={i} className="transition-transform duration-300">
                 {i < lives ? '❤️' : '🖤'}
@@ -697,45 +703,48 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
           </div>
 
           {/* Scores */}
-          <div className="flex items-center gap-1.5 text-white">
-            <span>🏆 Skor:</span>
-            <span className="text-[#FFDC00] text-base font-black">{hudScores.p1}</span>
+          <div className="flex items-center gap-1 text-white shrink-0" title="Skor kamu">
+            <span>🏆<span className="hidden md:inline"> Skor:</span></span>
+            <span className="text-[#FFDC00] text-sm sm:text-base font-black tabular-nums">{hudScores.p1}</span>
           </div>
 
           {gameMode === 'multi' && (
-            <div className="flex items-center gap-1.5 text-[#39CCCC]">
-              <span>Lawan:</span>
-              <span className="text-base font-black">{hudScores.p2}</span>
+            <div className="flex items-center gap-1 text-[#39CCCC] shrink-0" title={`Skor ${p2.name}`}>
+              <span className="max-w-[70px] sm:max-w-[110px] truncate">{p2.avatar}<span className="hidden md:inline"> {p2.name}</span></span>
+              <span className="text-sm sm:text-base font-black tabular-nums">{hudScores.p2}</span>
             </div>
           )}
 
           {/* Counter */}
-          <div className="text-[#b8d4f0] text-xs">
-            Soal: {answeredCount}/{targetCount}
+          <div className="text-[#b8d4f0] text-[11px] sm:text-xs shrink-0 tabular-nums" title="Soal terjawab">
+            ❓{answeredCount}/{targetCount}
           </div>
 
           {/* Fullscreen & Rotate Button (Great for mobile & tablets) */}
           <button
             onClick={requestFullscreenAndLandscape}
-            className="px-2.5 py-1.5 rounded-xl bg-white/10 hover:bg-[#39CCCC]/30 border border-white/20 text-xs font-bold text-white transition-all cursor-pointer flex items-center gap-1"
+            className="h-8 px-2 sm:px-2.5 rounded-xl bg-white/10 hover:bg-[#39CCCC]/30 border border-white/20 text-xs font-bold text-white transition-all cursor-pointer flex items-center gap-1 shrink-0"
             title="Layar Penuh & Mode Lanskap"
+            aria-label="Layar Penuh"
           >
             <span>⛶</span>
-            <span className="hidden md:inline">{isFullscreen ? 'Kecilkan' : 'Layar Penuh'}</span>
+            <span className="hidden xl:inline">{isFullscreen ? 'Kecilkan' : 'Layar Penuh'}</span>
           </button>
 
           {/* Virtual Controls Toggle Button */}
           <button
             onClick={() => setShowVirtualControls(!showVirtualControls)}
-            className={`px-2.5 py-1.5 rounded-xl border text-xs font-bold transition-all cursor-pointer flex items-center gap-1 ${
+            className={`h-8 px-2 sm:px-2.5 rounded-xl border text-xs font-bold transition-all cursor-pointer flex items-center gap-1 shrink-0 ${
               showVirtualControls
                 ? 'bg-[#39CCCC]/25 border-[#39CCCC] text-[#39CCCC]'
                 : 'bg-white/10 border-white/20 text-white/70'
             }`}
             title="Tampilkan / Sembunyikan Tombol Kontrol Layar"
+            aria-label="Tombol kontrol layar"
+            aria-pressed={showVirtualControls}
           >
             <span>🎮</span>
-            <span className="hidden md:inline">D-Pad</span>
+            <span className="hidden xl:inline">D-Pad</span>
           </button>
 
           {/* Sound & BGM Toggle */}
@@ -750,8 +759,9 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
                 seaAudio.stopBGM();
               }
             }}
-            className="w-8 h-8 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm border border-white/20 cursor-pointer"
+            className="w-8 h-8 shrink-0 rounded-xl bg-white/10 hover:bg-white/20 flex items-center justify-center text-sm border border-white/20 cursor-pointer"
             title={soundOn ? 'Matikan Suara & Musik' : 'Nyalakan Suara & Musik'}
+            aria-label={soundOn ? 'Matikan suara' : 'Nyalakan suara'}
           >
             {soundOn ? '🔊' : '🔇'}
           </button>
@@ -762,8 +772,8 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
           EXPLORATION BANNER TOAST (At start of game)
           ═══════════════════════════════════════════════ */}
       {showIntroToast && (
-        <div className="absolute top-18 left-1/2 -translate-x-1/2 z-40 max-w-lg w-[90%] px-4 py-2.5 rounded-2xl bg-[#00244d]/95 border-2 border-[#FFDC00] text-center shadow-2xl backdrop-blur-md animate-fadeIn pointer-events-none">
-          <p className="text-xs md:text-sm font-bold text-white flex items-center justify-center gap-2">
+        <div className="absolute top-14 sm:top-16 short:top-12 left-1/2 -translate-x-1/2 z-40 max-w-lg w-[calc(100%-1rem)] sm:w-[90%] px-3 sm:px-4 py-2 rounded-2xl bg-[#00244d]/95 border-2 border-[#FFDC00] text-center shadow-2xl backdrop-blur-md animate-fadeIn pointer-events-none">
+          <p className="text-[11px] sm:text-sm font-bold text-white flex items-center justify-center gap-2">
             <span>🗺️</span>
             <span>Jelajahi samudra luas! Berenang cari Gelembung Soal (❓) dan kumpulkan Mutiara (🦪)!</span>
           </p>
@@ -773,7 +783,7 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
       {/* ═══════════════════════════════════════════════
           MINI-MAP RADAR OVERLAY (Top Right)
           ═══════════════════════════════════════════════ */}
-      <div className="absolute top-20 right-4 z-35 w-36 h-24 bg-[#001024]/85 border-[1.5px] border-[#39CCCC] rounded-xl shadow-xl overflow-hidden backdrop-blur-sm pointer-events-none hidden sm:block">
+      <div className="absolute top-16 short:top-12 right-3 z-30 w-36 h-24 short:scale-75 origin-top-right bg-[#001024]/85 border-[1.5px] border-[#39CCCC] rounded-xl shadow-xl overflow-hidden backdrop-blur-sm pointer-events-none hidden sm:block">
         <div className="text-[9px] font-bold text-center bg-[#0074D9]/40 text-[#FFDC00] py-0.5 border-b border-[#39CCCC]/30">
           RADAR SAMUDRA
         </div>
@@ -855,7 +865,12 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
               ═══════════════════════════════════════════════ */}
 
           {/* Shimmering Sunlight Caustics Rays from Ocean Surface */}
-          <div className="absolute top-0 left-0 w-full h-[650px] bg-gradient-to-b from-white/18 via-sky-300/10 to-transparent blur-2xl animate-caustics pointer-events-none" />
+          {currentLevel !== 3 && (
+            <div className="absolute top-0 left-0 w-full h-[650px] bg-gradient-to-b from-white/18 via-sky-300/10 to-transparent blur-2xl animate-caustics pointer-events-none" />
+          )}
+
+          {/* Layered realistic scenery: light rays, dunes, kelp, coral, wreck, vents, fish schools, marine snow */}
+          <OceanScenery level={currentLevel} />
 
           {/* Animated Rising & Floating World Bubbles (Organic non-diagonal layout) */}
           {ORGANIC_WORLD_BUBBLES.map((b, i) => (
@@ -872,45 +887,6 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
               }}
             />
           ))}
-
-          {/* Swaying Kelp and Sea Plants Forest along the seabed */}
-          {Array.from({ length: 32 }).map((_, i) => {
-            const posX = (i * 94) % (WORLD_WIDTH - 120) + 50;
-            const isTall = i % 2 === 0;
-            const swayClass = i % 3 === 0
-              ? 'animate-seaweed-sway'
-              : i % 3 === 1
-              ? 'animate-seaweed-sway-delayed'
-              : 'animate-seaweed-fast';
-
-            return (
-              <div
-                key={`kelp-${i}`}
-                className={`absolute bottom-0 select-none pointer-events-none ${swayClass}`}
-                style={{
-                  left: `${posX}px`,
-                  height: isTall ? '280px' : '190px',
-                  width: '42px',
-                  opacity: 0.85
-                }}
-              >
-                <svg viewBox="0 0 40 240" className="w-full h-full fill-none">
-                  <path
-                    d={
-                      isTall
-                        ? "M20 240 Q10 180 25 130 T15 60 Q10 20 20 0 Q30 20 25 60 T35 130 Q40 180 20 240 Z"
-                        : "M20 240 Q8 170 24 110 T16 40 Q22 10 20 0 Q28 15 24 50 T32 110 Q34 170 20 240 Z"
-                    }
-                    fill={currentLevel === 3 ? "#9333ea" : currentLevel === 2 ? "#0d9488" : "#16a34a"}
-                    opacity="0.8"
-                  />
-                  <circle cx="20" cy="40" r="4" fill="#86efac" opacity="0.6" />
-                  <circle cx="24" cy="90" r="5" fill="#86efac" opacity="0.6" />
-                  <circle cx="18" cy="150" r="4" fill="#86efac" opacity="0.6" />
-                </svg>
-              </div>
-            );
-          })}
 
           {/* 🌊 ZONA 1: TERUMBU KARANG DANGKAL (Organic non-diagonal layout) */}
           {currentLevel === 1 && (
@@ -933,12 +909,6 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
           {/* ⚓ ZONA 2: KAPAL KARAM MISTERIUS (Organic non-diagonal wreck sites) */}
           {currentLevel === 2 && (
             <div className="absolute inset-0 pointer-events-none">
-              <div className="absolute left-[650px] top-[1150px] text-8xl md:text-9xl opacity-75">
-                ⛵
-              </div>
-              <div className="absolute left-[2200px] top-[1350px] text-8xl md:text-9xl opacity-75">
-                ⚓
-              </div>
               {ZONA_2_DECOR.map((item, i) => (
                 <div
                   key={`ship-${i}`}
@@ -973,27 +943,34 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
           )}
 
           {/* MOVING AMBIENT SCHOOLS OF FISH (Corrected orientation: no backward swimming) */}
-          {ambientFishesRef.current.map(fish => (
+          {ambientFishesRef.current.map((fish, i) => (
             <div
               key={fish.id}
-              className="absolute pointer-events-none select-none transition-transform"
+              className="absolute pointer-events-none select-none"
               style={{
                 left: `${fish.x}px`,
                 top: `${fish.y}px`,
                 fontSize: `${fish.size}px`,
                 // Unicode fish face left natively. When moving right (vx > 0), scaleX(-1) turns them right.
-                transform: fish.vx > 0 ? 'scaleX(-1)' : 'scaleX(1)'
+                transform: fish.vx > 0 ? 'scaleX(-1)' : 'scaleX(1)',
+                // Smaller fish look further away: slightly faded into the water
+                opacity: 0.55 + Math.min(0.45, (fish.size - 24) / 40)
               }}
             >
-              {fish.emoji}
+              <span
+                className="ocean-fish-wiggle inline-block"
+                style={{ animationDuration: `${0.5 + (i % 4) * 0.12}s` }}
+              >
+                {fish.emoji}
+              </span>
             </div>
           ))}
 
           {/* MOVING JELLYFISH OBSTACLES (Drifting & Patrolling) */}
-          {jellyfishesRef.current.map(jelly => (
+          {jellyfishesRef.current.map((jelly, i) => (
             <div
               key={jelly.id}
-              className="absolute flex items-center justify-center text-4xl md:text-5xl drop-shadow-[0_0_14px_rgba(244,63,94,0.85)] pointer-events-none select-none animate-pulse"
+              className="absolute flex items-center justify-center pointer-events-none select-none"
               style={{
                 left: `${jelly.x}px`,
                 top: `${jelly.y}px`,
@@ -1001,7 +978,22 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
                 height: `${jelly.height}px`
               }}
             >
-              🪼
+              {/* Soft glow halo */}
+              <span
+                className="absolute inset-[-14px] rounded-full ocean-vent-glow"
+                style={{
+                  background: currentLevel === 3
+                    ? 'radial-gradient(circle, rgba(192,132,252,0.45), transparent 65%)'
+                    : 'radial-gradient(circle, rgba(244,114,182,0.35), transparent 65%)',
+                  animationDuration: '1.6s'
+                }}
+              />
+              <span
+                className="animate-jelly-pulse inline-block text-4xl md:text-5xl opacity-90 drop-shadow-[0_0_14px_rgba(244,63,94,0.85)]"
+                style={{ animationDelay: `-${(i % 5) * 0.3}s` }}
+              >
+                🪼
+              </span>
             </div>
           ))}
 
@@ -1140,6 +1132,41 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
       </div>
 
       {/* ═══════════════════════════════════════════════
+          SCREEN-SPACE UNDERWATER LIGHTING
+          Darker as the player dives deeper, soft vignette, and in Zona 3 only the
+          area around the diver is lit (like a headlamp in the abyss).
+          ═══════════════════════════════════════════════ */}
+      {(() => {
+        const viewW = arenaRef.current?.clientWidth || window.innerWidth;
+        const viewH = arenaRef.current?.clientHeight || window.innerHeight;
+        const depth = Math.min(1, Math.max(0, (camera.y + viewH / 2) / WORLD_HEIGHT));
+        const maxDark = currentLevel === 1 ? 0.28 : currentLevel === 2 ? 0.42 : 0.2;
+        const px = p1.x + p1.width / 2 - camera.x;
+        const py = p1.y + p1.height / 2 - camera.y;
+        const lightRadius = Math.max(220, Math.min(viewW, viewH) * 0.55);
+        return (
+          <div className="absolute inset-0 z-[5] pointer-events-none">
+            <div
+              className="absolute inset-0"
+              style={{ background: `rgba(0, 8, 24, ${(depth * maxDark).toFixed(3)})` }}
+            />
+            {currentLevel === 3 && (
+              <div
+                className="absolute inset-0"
+                style={{
+                  background: `radial-gradient(circle ${lightRadius}px at ${px}px ${py}px, transparent 0%, rgba(80, 40, 160, 0.06) 45%, rgba(2, 0, 12, 0.62) 100%)`
+                }}
+              />
+            )}
+            <div
+              className="absolute inset-0"
+              style={{ background: 'radial-gradient(ellipse at center, transparent 55%, rgba(0, 6, 20, 0.55) 100%)' }}
+            />
+          </div>
+        );
+      })()}
+
+      {/* ═══════════════════════════════════════════════
           TOUCH & MOBILE FLOATING CONTROLS (D-PAD + TURBO)
           No md:hidden! Visible on mobile phones, tablets, or when enabled!
           ═══════════════════════════════════════════════ */}
@@ -1147,79 +1174,61 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
         <>
           {/* Left: 4-Way D-Pad with touch-action: none to prevent page scrolling */}
           <div
-            className="fixed bottom-5 left-5 z-40 flex flex-col items-center gap-1.5 select-none"
-            style={{ touchAction: 'none' }}
+            className="fixed z-40 grid grid-cols-3 grid-rows-3 gap-1 sm:gap-1.5 select-none opacity-90"
+            style={{
+              touchAction: 'none',
+              left: 'max(12px, env(safe-area-inset-left))',
+              bottom: 'max(12px, env(safe-area-inset-bottom))'
+            }}
           >
-            <button
-              type="button"
-              onTouchStart={(e) => { e.preventDefault(); handleDpadPress('ArrowUp', true); }}
-              onTouchEnd={(e) => { e.preventDefault(); handleDpadPress('ArrowUp', false); }}
-              onMouseDown={() => handleDpadPress('ArrowUp', true)}
-              onMouseUp={() => handleDpadPress('ArrowUp', false)}
-              className="w-14 h-14 rounded-2xl bg-[#001f3f]/95 border-2 border-[#39CCCC] text-white text-2xl font-black active:bg-[#39CCCC] active:text-[#001f3f] flex items-center justify-center shadow-2xl backdrop-blur-md active:scale-95 transition-transform"
-              aria-label="Naik"
-            >
-              ▲
-            </button>
-            <div className="flex gap-4">
+            {([
+              { code: 'ArrowUp', label: 'Naik', icon: '▲', cls: 'col-start-2 row-start-1' },
+              { code: 'ArrowLeft', label: 'Kiri', icon: '◀', cls: 'col-start-1 row-start-2' },
+              { code: 'ArrowRight', label: 'Kanan', icon: '▶', cls: 'col-start-3 row-start-2' },
+              { code: 'ArrowDown', label: 'Turun', icon: '▼', cls: 'col-start-2 row-start-3' }
+            ] as const).map((btn) => (
               <button
+                key={btn.code}
                 type="button"
-                onTouchStart={(e) => { e.preventDefault(); handleDpadPress('ArrowLeft', true); }}
-                onTouchEnd={(e) => { e.preventDefault(); handleDpadPress('ArrowLeft', false); }}
-                onMouseDown={() => handleDpadPress('ArrowLeft', true)}
-                onMouseUp={() => handleDpadPress('ArrowLeft', false)}
-                className="w-14 h-14 rounded-2xl bg-[#001f3f]/95 border-2 border-[#39CCCC] text-white text-2xl font-black active:bg-[#39CCCC] active:text-[#001f3f] flex items-center justify-center shadow-2xl backdrop-blur-md active:scale-95 transition-transform"
-                aria-label="Kiri"
+                onPointerDown={(e) => { e.preventDefault(); handleDpadPress(btn.code, true); }}
+                onPointerUp={() => handleDpadPress(btn.code, false)}
+                onPointerLeave={() => handleDpadPress(btn.code, false)}
+                onPointerCancel={() => handleDpadPress(btn.code, false)}
+                onContextMenu={(e) => e.preventDefault()}
+                className={`${btn.cls} w-12 h-12 sm:w-14 sm:h-14 short:w-11 short:h-11 rounded-2xl bg-[#001f3f]/85 border-2 border-[#39CCCC] text-white text-xl sm:text-2xl font-black active:bg-[#39CCCC] active:text-[#001f3f] flex items-center justify-center shadow-2xl backdrop-blur-md active:scale-95 transition-transform`}
+                aria-label={btn.label}
               >
-                ◀
+                {btn.icon}
               </button>
-              <button
-                type="button"
-                onTouchStart={(e) => { e.preventDefault(); handleDpadPress('ArrowDown', true); }}
-                onTouchEnd={(e) => { e.preventDefault(); handleDpadPress('ArrowDown', false); }}
-                onMouseDown={() => handleDpadPress('ArrowDown', true)}
-                onMouseUp={() => handleDpadPress('ArrowDown', false)}
-                className="w-14 h-14 rounded-2xl bg-[#001f3f]/95 border-2 border-[#39CCCC] text-white text-2xl font-black active:bg-[#39CCCC] active:text-[#001f3f] flex items-center justify-center shadow-2xl backdrop-blur-md active:scale-95 transition-transform"
-                aria-label="Turun"
-              >
-                ▼
-              </button>
-              <button
-                type="button"
-                onTouchStart={(e) => { e.preventDefault(); handleDpadPress('ArrowRight', true); }}
-                onTouchEnd={(e) => { e.preventDefault(); handleDpadPress('ArrowRight', false); }}
-                onMouseDown={() => handleDpadPress('ArrowRight', true)}
-                onMouseUp={() => handleDpadPress('ArrowRight', false)}
-                className="w-14 h-14 rounded-2xl bg-[#001f3f]/95 border-2 border-[#39CCCC] text-white text-2xl font-black active:bg-[#39CCCC] active:text-[#001f3f] flex items-center justify-center shadow-2xl backdrop-blur-md active:scale-95 transition-transform"
-                aria-label="Kanan"
-              >
-                ▶
-              </button>
-            </div>
+            ))}
           </div>
 
           {/* Right: Quick Turbo / Speed-Up Swim Button */}
           <div
-            className="fixed bottom-6 right-6 z-40 flex flex-col items-center gap-1.5 select-none"
-            style={{ touchAction: 'none' }}
+            className="fixed z-40 flex flex-col items-center gap-1.5 select-none"
+            style={{
+              touchAction: 'none',
+              right: 'max(16px, env(safe-area-inset-right))',
+              bottom: 'max(16px, env(safe-area-inset-bottom))'
+            }}
           >
             <button
               type="button"
-              onTouchStart={(e) => {
+              onPointerDown={(e) => {
                 e.preventDefault();
                 p1Ref.current.speed = p1Ref.current.baseSpeed * (p1Ref.current.isShocked ? 0.8 : 1.45);
               }}
-              onTouchEnd={(e) => {
-                e.preventDefault();
+              onPointerUp={() => {
                 p1Ref.current.speed = p1Ref.current.baseSpeed * (p1Ref.current.isShocked ? 0.4 : 1.0);
               }}
-              onMouseDown={() => {
-                p1Ref.current.speed = p1Ref.current.baseSpeed * (p1Ref.current.isShocked ? 0.8 : 1.45);
-              }}
-              onMouseUp={() => {
+              onPointerLeave={() => {
                 p1Ref.current.speed = p1Ref.current.baseSpeed * (p1Ref.current.isShocked ? 0.4 : 1.0);
               }}
-              className="w-16 h-16 rounded-full bg-gradient-to-tr from-[#0074D9] to-[#39CCCC] border-2 border-white text-white text-xs font-black shadow-2xl flex flex-col items-center justify-center active:scale-90 transition-transform cursor-pointer"
+              onPointerCancel={() => {
+                p1Ref.current.speed = p1Ref.current.baseSpeed * (p1Ref.current.isShocked ? 0.4 : 1.0);
+              }}
+              onContextMenu={(e) => e.preventDefault()}
+              className="w-16 h-16 sm:w-[72px] sm:h-[72px] short:w-14 short:h-14 rounded-full bg-gradient-to-tr from-[#0074D9] to-[#39CCCC] border-2 border-white text-white text-xs font-black shadow-2xl flex flex-col items-center justify-center active:scale-90 transition-transform cursor-pointer"
               aria-label="Renang Cepat Turbo"
             >
               <span className="text-xl">⚡</span>

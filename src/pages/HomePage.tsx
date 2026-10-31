@@ -2,6 +2,7 @@ import React from 'react';
 import { AUTHOR_NAME, COLOR_GRADIENTS } from '../game/constants.ts';
 import { AvatarProfile, ModalType } from '../types/game.ts';
 import { seaAudio } from '../game/audio.ts';
+import { LogoHeader } from '../components/LogoHeader.tsx';
 
 interface HomePageProps {
   avatar: AvatarProfile | null;
@@ -12,6 +13,39 @@ interface HomePageProps {
   onStartMultiplayer: () => void;
 }
 
+interface MenuCardProps {
+  id: string;
+  icon: string;
+  iconClassName: string;
+  title: string;
+  description: string;
+  badge?: React.ReactNode;
+  onClick: () => void;
+}
+
+const MenuCard: React.FC<MenuCardProps> = ({ id, icon, iconClassName, title, description, badge, onClick }) => (
+  <button
+    id={id}
+    type="button"
+    onClick={() => {
+      seaAudio.klik();
+      onClick();
+    }}
+    className="group w-full text-left p-4 sm:p-5 rounded-3xl bg-[#041d3e]/90 border-[1.5px] border-[#39CCCC]/40 hover:border-[#FFDC00] focus-visible:border-[#FFDC00] focus-visible:outline-none shadow-lg flex flex-row sm:flex-col items-start gap-3 cursor-pointer transition-all hover:-translate-y-0.5 active:scale-[0.98]"
+  >
+    <div className={`w-12 h-12 sm:w-14 sm:h-14 shrink-0 rounded-2xl flex items-center justify-center text-2xl sm:text-3xl border ${iconClassName}`}>
+      {icon}
+    </div>
+    <div className="min-w-0 flex-1 flex flex-col gap-1.5 sm:gap-2 h-full">
+      <h3 className="text-base sm:text-lg font-bold text-white group-hover:text-[#FFDC00] transition-colors leading-snug">
+        {title}
+      </h3>
+      <p className="text-xs text-[#b8d4f0] leading-relaxed">{description}</p>
+      {badge && <div className="mt-auto pt-1">{badge}</div>}
+    </div>
+  </button>
+);
+
 export const HomePage: React.FC<HomePageProps> = ({
   avatar,
   avatarsCount,
@@ -21,222 +55,144 @@ export const HomePage: React.FC<HomePageProps> = ({
   onStartMultiplayer
 }) => {
   return (
-    <div className="max-w-6xl mx-auto w-full p-4 md:p-6 pb-16 flex flex-col gap-6 relative z-10 animate-fadeIn">
-      {/* Top Banner Identitas Pengembang dengan Logo Resmi PGRI & Pemkab Wonogiri */}
-      <div className="w-full p-5 md:p-6 rounded-3xl bg-[#041d3e]/90 border-[1.5px] border-[#39CCCC]/40 backdrop-blur-md shadow-xl flex flex-col md:flex-row items-center justify-between gap-4">
-        
-        <div className="flex flex-wrap items-center justify-center md:justify-start gap-4 text-center md:text-left">
-          {/* Logo PGRI & Pemkab Wonogiri */}
-          <div className="flex items-center gap-2.5 bg-[#001024]/80 p-1.5 px-3 rounded-2xl border border-white/10">
-            <img
-              src="https://lh3.googleusercontent.com/d/108U4lxE-NSOpI9tr8VahupSz69xFcfkj"
-              alt="Logo PGRI"
-              referrerPolicy="no-referrer"
-              className="w-10 h-10 object-contain filter drop-shadow"
-            />
-            <img
-              src="https://lh3.googleusercontent.com/d/13yDyw7PMGhR2jEdXngjCseJtnRhd4eP5"
-              alt="Logo Pemkab Wonogiri"
-              referrerPolicy="no-referrer"
-              className="w-10 h-10 object-contain filter drop-shadow"
-            />
-          </div>
-
-          <div>
-            <div className="flex items-center gap-2 justify-center md:justify-start">
-              <span className="text-2xl">🌊</span>
-              <h2 className="text-xl md:text-2xl font-black text-white">
-                Petualangan Pecahan Bawah Laut
-              </h2>
-            </div>
-            <p className="text-xs md:text-sm font-semibold text-[#FFDC00] mt-0.5">
-              {AUTHOR_NAME}
-            </p>
-          </div>
-        </div>
+    <div className="max-w-6xl mx-auto w-full px-3 py-4 sm:p-6 pb-12 flex flex-col gap-4 sm:gap-6 relative z-10 animate-fadeIn">
+      {/* Header: Logo Pemkab (kiri) · Judul · Logo PGRI (kanan) */}
+      <header className="w-full p-3 sm:p-5 md:p-6 rounded-3xl bg-[#041d3e]/90 border-[1.5px] border-[#39CCCC]/40 backdrop-blur-md shadow-xl flex flex-col gap-3 sm:gap-4">
+        <LogoHeader>
+          <h2 className="text-[clamp(0.95rem,3.6vw,1.75rem)] font-black text-white leading-tight">
+            <span className="hidden min-[360px]:inline">🌊 </span>Petualangan Pecahan Bawah Laut
+          </h2>
+          <p className="text-[10px] sm:text-xs md:text-sm font-semibold text-[#FFDC00] mt-1 leading-snug line-clamp-2">
+            {AUTHOR_NAME}
+          </p>
+        </LogoHeader>
 
         {/* Profile User Status & Switcher */}
-        <div
+        <button
+          type="button"
           onClick={() => {
             seaAudio.klik();
             onOpenModal('avatar');
           }}
-          className="flex items-center gap-3.5 bg-[#00142e]/85 border border-[#39CCCC]/40 hover:border-[#FFDC00] rounded-2xl px-4 py-2.5 cursor-pointer transition-all shadow-md group"
+          className="w-full sm:w-auto sm:self-center flex items-center gap-3 bg-[#00142e]/85 border border-[#39CCCC]/40 hover:border-[#FFDC00] rounded-2xl px-3 sm:px-4 py-2 cursor-pointer transition-all shadow-md group text-left"
           title="Klik untuk ganti atau buat avatar baru"
         >
           <div
-            className="w-12 h-12 rounded-full flex items-center justify-center text-2xl border-2 border-white shadow-md flex-shrink-0 group-hover:scale-105 transition-transform"
+            className="w-11 h-11 sm:w-12 sm:h-12 rounded-full flex items-center justify-center text-2xl border-2 border-white shadow-md shrink-0 group-hover:scale-105 transition-transform"
             style={{
               background: avatar ? COLOR_GRADIENTS[avatar.color] || COLOR_GRADIENTS.blue : 'rgba(255, 255, 255, 0.15)'
             }}
           >
             {avatar ? avatar.emoji : '❓'}
           </div>
-          <div className="leading-tight text-left">
-            <div className="text-[11px] text-[#b8d4f0] flex items-center justify-between gap-2">
-              <span>Pemain Aktif</span>
-              <span className="text-[10px] text-[#39CCCC] underline">Ganti ({avatarsCount})</span>
-            </div>
-            <strong className="text-sm md:text-base text-white block truncate max-w-[130px]">
+          <div className="min-w-0 flex-1 leading-tight">
+            <div className="text-[11px] text-[#b8d4f0]">Pemain Aktif</div>
+            <strong className="text-sm sm:text-base text-white block truncate">
               {avatar ? avatar.name : 'Buat Avatar'}
             </strong>
-            <div className="text-xs text-[#FFDC00] font-black mt-0.5">
-              Skor: {avatar ? avatar.totalScore : highScore}
+          </div>
+          <div className="shrink-0 text-right leading-tight pl-2 border-l border-white/10">
+            <div className="text-xs text-[#FFDC00] font-black">
+              🏆 {avatar ? avatar.totalScore : highScore}
             </div>
+            <div className="text-[10px] text-[#39CCCC] underline mt-0.5">Ganti ({avatarsCount})</div>
+          </div>
+        </button>
+      </header>
+
+      {/* Single Player (Featured) */}
+      <button
+        id="btn-menu-play-single"
+        type="button"
+        onClick={() => {
+          seaAudio.klik();
+          onStartSinglePlayer();
+        }}
+        className="w-full text-left p-4 sm:p-6 rounded-3xl bg-gradient-to-r from-[#0074D9]/85 via-[#004b87]/90 to-[#041d3e]/95 border-2 border-[#FFDC00] shadow-[0_8px_30px_rgba(0,116,217,0.4)] flex flex-col md:flex-row md:items-center justify-between gap-4 cursor-pointer hover:shadow-[0_12px_36px_rgba(255,220,0,0.35)] transition-all active:scale-[0.99]"
+      >
+        <div className="flex items-center gap-3 sm:gap-4">
+          <div className="w-14 h-14 sm:w-16 sm:h-16 rounded-2xl bg-[#FFDC00]/20 border border-[#FFDC00]/40 flex items-center justify-center text-3xl shrink-0">
+            🎮
+          </div>
+          <div className="min-w-0">
+            <h3 className="text-lg sm:text-2xl font-black text-white leading-tight">
+              Mulai Petualangan <span className="text-[#FFDC00] text-sm sm:text-lg font-bold whitespace-nowrap">(Single Player)</span>
+            </h3>
+            <p className="text-xs sm:text-sm text-[#d0e6ff] mt-1 leading-relaxed">
+              Jelajahi 3 Zona Samudra: Terumbu Karang, Kapal Karam, & Palung Mariana. Cari gelembung soal dan kumpulkan mutiara!
+            </p>
           </div>
         </div>
-      </div>
+        <span className="w-full md:w-auto text-center py-3 px-6 rounded-2xl font-extrabold text-sm bg-gradient-to-r from-[#FFDC00] to-[#ff9800] text-[#00172e] shadow-md whitespace-nowrap">
+          PILIH LEVEL ➔
+        </span>
+      </button>
 
       {/* Main Menu Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
-        
-        {/* Single Player (Featured) */}
-        <div
-          id="btn-menu-play-single"
-          onClick={() => {
-            seaAudio.klik();
-            onStartSinglePlayer();
-          }}
-          className="col-span-1 md:col-span-2 lg:col-span-3 p-6 rounded-3xl bg-gradient-to-r from-[#0074D9]/85 via-[#004b87]/90 to-[#041d3e]/95 border-2 border-[#FFDC00] shadow-[0_8px_30px_rgba(0,116,217,0.4)] flex flex-col md:flex-row items-center justify-between gap-5 cursor-pointer hover:shadow-[0_12px_36px_rgba(255,220,0,0.35)] transition-all"
-        >
-          <div className="flex items-center gap-4 text-center md:text-left">
-            <div className="w-16 h-16 rounded-2xl bg-[#FFDC00]/20 border border-[#FFDC00]/40 flex items-center justify-center text-3xl flex-shrink-0">
-              🎮
-            </div>
-            <div>
-              <h3 className="text-xl md:text-2xl font-black text-white">
-                Mulai Petualangan (Single Player)
-              </h3>
-              <p className="text-xs md:text-sm text-[#d0e6ff] mt-1">
-                Jelajahi 3 Zona Samudra: Terumbu Karang, Kapal Karam, & Palung Mariana. Cari gelembung soal dan kumpulkan mutiara!
-              </p>
-            </div>
-          </div>
-          <button className="py-3 px-6 rounded-2xl font-extrabold text-sm bg-gradient-to-r from-[#FFDC00] to-[#ff9800] text-[#00172e] pointer-events-none shadow-md">
-            PILIH LEVEL ➔
-          </button>
-        </div>
-
-        {/* Multiplayer Lintas Device */}
-        <div
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-5">
+        <MenuCard
           id="btn-menu-play-multi"
-          onClick={() => {
-            seaAudio.klik();
-            onStartMultiplayer();
-          }}
-          className="p-5 rounded-3xl bg-[#041d3e]/90 border-[1.5px] border-[#39CCCC]/40 hover:border-[#FFDC00] shadow-lg flex flex-col gap-3 cursor-pointer transition-all"
-        >
-          <div className="w-14 h-14 rounded-2xl bg-[#39CCCC]/20 border border-[#39CCCC]/40 flex items-center justify-center text-3xl">
-            ⚔️
-          </div>
-          <h3 className="text-lg font-bold text-white">Multiplayer Antar-Device (Room)</h3>
-          <p className="text-xs text-[#b8d4f0] leading-relaxed">
-            Tanding bersama teman di perangkat berbeda via Room Kode! Berebut 15 soal & mutiara secara real-time.
-          </p>
-          <div className="mt-auto pt-2">
-            <span className="px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide bg-[#39CCCC]/25 text-[#39CCCC] border border-[#39CCCC]/50">
-              Real-time WebSocket Room
+          icon="⚔️"
+          iconClassName="bg-[#39CCCC]/20 border-[#39CCCC]/40"
+          title="Multiplayer Antar-Device (Room)"
+          description="Tanding bersama teman di perangkat berbeda via Room Kode! Berebut 15 soal & mutiara secara real-time."
+          badge={
+            <span className="inline-block px-3 py-1 rounded-full text-[10px] font-extrabold uppercase tracking-wide bg-[#39CCCC]/25 text-[#39CCCC] border border-[#39CCCC]/50">
+              Real-time Room
             </span>
-          </div>
-        </div>
+          }
+          onClick={onStartMultiplayer}
+        />
 
-        {/* Avatar Creator & Switcher */}
-        <div
+        <MenuCard
           id="btn-menu-avatar"
-          onClick={() => {
-            seaAudio.klik();
-            onOpenModal('avatar');
-          }}
-          className="p-5 rounded-3xl bg-[#041d3e]/90 border-[1.5px] border-[#39CCCC]/40 hover:border-[#FFDC00] shadow-lg flex flex-col gap-3 cursor-pointer transition-all"
-        >
-          <div className="w-14 h-14 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center text-3xl">
-            🐠
-          </div>
-          <h3 className="text-lg font-bold text-white">Kelola & Ganti Avatar ({avatarsCount})</h3>
-          <p className="text-xs text-[#b8d4f0] leading-relaxed">
-            Buat 2 atau lebih avatar, ganti avatar pemain, dan kumpulkan skor serta mutiara pada setiap karakter.
-          </p>
-        </div>
+          icon="🐠"
+          iconClassName="bg-white/10 border-white/20"
+          title={`Kelola & Ganti Avatar (${avatarsCount})`}
+          description="Buat 2 atau lebih avatar, ganti avatar pemain, dan kumpulkan skor serta mutiara pada setiap karakter."
+          onClick={() => onOpenModal('avatar')}
+        />
 
-        {/* Kelola Soal & Bank Soal CSV (Password Akses Guru) */}
-        <div
+        <MenuCard
           id="btn-menu-crud"
-          onClick={() => {
-            seaAudio.klik();
-            onOpenModal('teacher-auth');
-          }}
-          className="p-5 rounded-3xl bg-[#041d3e]/90 border-[1.5px] border-[#39CCCC]/40 hover:border-[#FFDC00] shadow-lg flex flex-col gap-3 cursor-pointer transition-all group"
-        >
-          <div className="flex items-center justify-between">
-            <div className="w-14 h-14 rounded-2xl bg-[#FFDC00]/15 border border-[#FFDC00]/40 flex items-center justify-center text-3xl">
-              📚
-            </div>
-            <span className="px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wide bg-amber-500/20 text-[#FFDC00] border border-amber-400/40 flex items-center gap-1">
+          icon="📚"
+          iconClassName="bg-[#FFDC00]/15 border-[#FFDC00]/40"
+          title="Kelola Bank Soal & CSV"
+          description="Akses khusus guru (dilindungi password) untuk menambah, mengedit, menghapus, serta Import/Export CSV."
+          badge={
+            <span className="inline-flex px-2.5 py-1 rounded-full text-[10px] font-black uppercase tracking-wide bg-amber-500/20 text-[#FFDC00] border border-amber-400/40 items-center gap-1">
               <span>🔒</span> Khusus Guru
             </span>
-          </div>
-          <h3 className="text-lg font-bold text-white group-hover:text-[#FFDC00] transition-colors">
-            Kelola Bank Soal & CSV
-          </h3>
-          <p className="text-xs text-[#b8d4f0] leading-relaxed">
-            Akses khusus guru (dilindungi password) untuk menambah, mengedit, menghapus, serta Import/Export CSV.
-          </p>
-        </div>
+          }
+          onClick={() => onOpenModal('teacher-auth')}
+        />
 
-        {/* Leaderboard & Database Pengguna CSV */}
-        <div
+        <MenuCard
           id="btn-menu-leaderboard"
-          onClick={() => {
-            seaAudio.klik();
-            onOpenModal('leaderboard');
-          }}
-          className="p-5 rounded-3xl bg-[#041d3e]/90 border-[1.5px] border-[#39CCCC]/40 hover:border-[#FFDC00] shadow-lg flex flex-col gap-3 cursor-pointer transition-all"
-        >
-          <div className="w-14 h-14 rounded-2xl bg-[#FFDC00]/20 border border-[#FFDC00]/40 flex items-center justify-center text-3xl">
-            🏆
-          </div>
-          <h3 className="text-lg font-bold text-white">Papan Peringkat & Juara Umum</h3>
-          <p className="text-xs text-[#b8d4f0] leading-relaxed">
-            Peringkat juara umum & per-zona samudra. Skor total kuis pecahan dan perolehan mutiara tercatat otomatis.
-          </p>
-        </div>
+          icon="🏆"
+          iconClassName="bg-[#FFDC00]/20 border-[#FFDC00]/40"
+          title="Papan Peringkat & Juara Umum"
+          description="Peringkat juara umum & per-zona samudra. Skor total kuis pecahan dan perolehan mutiara tercatat otomatis."
+          onClick={() => onOpenModal('leaderboard')}
+        />
 
-        {/* Pengaturan & Capaian Pembelajaran */}
-        <div
+        <MenuCard
           id="btn-menu-settings"
-          onClick={() => {
-            seaAudio.klik();
-            onOpenModal('settings');
-          }}
-          className="p-5 rounded-3xl bg-[#041d3e]/90 border-[1.5px] border-[#39CCCC]/40 hover:border-[#FFDC00] shadow-lg flex flex-col gap-3 cursor-pointer transition-all"
-        >
-          <div className="w-14 h-14 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center text-3xl">
-            ⚙️
-          </div>
-          <h3 className="text-lg font-bold text-white">Pengaturan & Tujuan Belajar</h3>
-          <p className="text-xs text-[#b8d4f0] leading-relaxed">
-            Tujuan Pembelajaran TP 1, 2, 3 Matematika SD, kontrol audio Web Audio API, & reset data.
-          </p>
-        </div>
+          icon="⚙️"
+          iconClassName="bg-white/10 border-white/20"
+          title="Pengaturan & Tujuan Belajar"
+          description="Tujuan Pembelajaran TP 1, 2, 3 Matematika SD, kontrol audio, & reset data."
+          onClick={() => onOpenModal('settings')}
+        />
 
-        {/* Petunjuk Bermain */}
-        <div
+        <MenuCard
           id="btn-menu-guide"
-          onClick={() => {
-            seaAudio.klik();
-            onOpenModal('guide');
-          }}
-          className="p-5 rounded-3xl bg-[#041d3e]/90 border-[1.5px] border-[#39CCCC]/40 hover:border-[#FFDC00] shadow-lg flex flex-col gap-3 cursor-pointer transition-all"
-        >
-          <div className="w-14 h-14 rounded-2xl bg-white/10 border border-white/20 flex items-center justify-center text-3xl">
-            ❓
-          </div>
-          <h3 className="text-lg font-bold text-white">Petunjuk Cara Bermain</h3>
-          <p className="text-xs text-[#b8d4f0] leading-relaxed">
-            Pelajari cara navigasi, gelembung soal stasioner, mutiara bonus, & sengatan ubur-ubur.
-          </p>
-        </div>
-
+          icon="❓"
+          iconClassName="bg-white/10 border-white/20"
+          title="Petunjuk Cara Bermain"
+          description="Pelajari cara navigasi, gelembung soal stasioner, mutiara bonus, & sengatan ubur-ubur."
+          onClick={() => onOpenModal('guide')}
+        />
       </div>
     </div>
   );

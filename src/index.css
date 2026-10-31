@@ -1,5 +1,8 @@
 @import "tailwindcss";
 
+/* Short viewports (phones in landscape) */
+@custom-variant short (@media (max-height: 480px));
+
 @layer base {
   * {
     box-sizing: border-box;
@@ -186,4 +189,163 @@
 
 .animate-sparks {
   animation: electricSparks 0.25s ease-in-out infinite alternate;
+}
+
+/* ═══════════════════════════════════════════════
+   REALISTIC OCEAN SCENERY (OceanScenery.tsx)
+   Only transform / opacity are animated so the GPU compositor does the work.
+   ═══════════════════════════════════════════════ */
+
+/* Sunlight shafts (god rays) */
+@keyframes godRay {
+  0%, 100% { opacity: 0.25; transform: translateX(0) skewX(var(--ray-skew, -14deg)); }
+  50% { opacity: 0.65; transform: translateX(40px) skewX(var(--ray-skew, -14deg)); }
+}
+.ocean-god-ray {
+  transform-origin: top center;
+  mix-blend-mode: screen;
+  animation: godRay ease-in-out infinite;
+}
+
+/* Rippling water surface seen from below */
+@keyframes surfaceDrift {
+  from { transform: translateX(0); }
+  to { transform: translateX(-240px); }
+}
+.ocean-surface {
+  animation: surfaceDrift 9s linear infinite;
+}
+
+/* Caustic light net dancing on the sand */
+@keyframes causticDriftA {
+  from { transform: translate(0, 0); }
+  to { transform: translate(-160px, -40px); }
+}
+@keyframes causticDriftB {
+  from { transform: translate(-160px, 0); }
+  to { transform: translate(0, -40px); }
+}
+.ocean-caustic-a { animation: causticDriftA 11s linear infinite; mix-blend-mode: screen; }
+.ocean-caustic-b { animation: causticDriftB 14s linear infinite; mix-blend-mode: screen; }
+
+/* Kelp / sea plants swaying in the current */
+@keyframes kelpSway {
+  0%, 100% { transform: rotate(-3deg) skewX(-5deg); }
+  50% { transform: rotate(3deg) skewX(5deg); }
+}
+.ocean-kelp {
+  transform-origin: bottom center;
+  animation: kelpSway ease-in-out infinite;
+}
+
+/* Anemone tentacles (SVG) */
+@keyframes tentacleSway {
+  0%, 100% { transform: rotate(-12deg); }
+  50% { transform: rotate(12deg); }
+}
+.ocean-tentacle {
+  transform-box: fill-box;
+  transform-origin: 50% 100%;
+  animation: tentacleSway 2.8s ease-in-out infinite;
+}
+
+/* Bubble columns rising from the seabed */
+@keyframes bubbleRise {
+  0% { transform: translate(0, 0) scale(0.5); opacity: 0; }
+  10% { opacity: 0.9; }
+  25% { transform: translate(8px, calc(var(--rise, 900px) * -0.25)) scale(0.7); }
+  50% { transform: translate(-8px, calc(var(--rise, 900px) * -0.5)) scale(0.9); }
+  75% { transform: translate(7px, calc(var(--rise, 900px) * -0.75)) scale(1.05); opacity: 0.75; }
+  100% { transform: translate(-4px, calc(var(--rise, 900px) * -1)) scale(1.2); opacity: 0; }
+}
+.ocean-bubble {
+  animation: bubbleRise linear infinite;
+  background: radial-gradient(circle at 32% 30%, rgba(255, 255, 255, 0.95) 0 14%, rgba(190, 235, 255, 0.35) 30%, rgba(160, 220, 255, 0.08) 65%, transparent 72%);
+  box-shadow: inset 0 0 0 1px rgba(220, 245, 255, 0.55);
+}
+
+/* Big creatures / fish schools crossing the whole world */
+@keyframes swimAcross {
+  from { transform: translateX(-700px); }
+  to { transform: translateX(3700px); }
+}
+.ocean-swim-across { animation: swimAcross linear infinite; }
+
+@keyframes swimBob {
+  0%, 100% { transform: translateY(0) rotate(-1.5deg); }
+  50% { transform: translateY(26px) rotate(1.5deg); }
+}
+.ocean-swim-bob { animation: swimBob ease-in-out infinite; }
+
+/* Tail wiggle for small fish */
+@keyframes fishWiggle {
+  0%, 100% { transform: rotate(-4deg) scaleY(1); }
+  50% { transform: rotate(4deg) scaleY(0.92); }
+}
+.ocean-fish-wiggle {
+  transform-origin: 60% 50%;
+  animation: fishWiggle 0.6s ease-in-out infinite;
+}
+
+/* Manta wing flap */
+@keyframes mantaFlap {
+  0%, 100% { transform: scaleY(1); }
+  50% { transform: scaleY(0.7); }
+}
+.ocean-manta-flap { animation: mantaFlap 3.2s ease-in-out infinite; }
+
+/* Marine snow & suspended particles */
+@keyframes marineSnow {
+  0% { transform: translate(0, 0); opacity: 0; }
+  15% { opacity: var(--snow-opacity, 0.7); }
+  50% { transform: translate(14px, 160px); }
+  85% { opacity: var(--snow-opacity, 0.7); }
+  100% { transform: translate(-6px, 320px); opacity: 0; }
+}
+.ocean-snow { animation: marineSnow linear infinite; }
+
+/* Bioluminescent plankton twinkle */
+@keyframes planktonTwinkle {
+  0%, 100% { opacity: 0.1; transform: scale(0.6); }
+  50% { opacity: 1; transform: scale(1.25); }
+}
+.ocean-twinkle { animation: planktonTwinkle ease-in-out infinite; }
+
+/* Hydrothermal vent smoke */
+@keyframes ventSmoke {
+  0% { transform: translate(0, 0) scale(0.4); opacity: 0; }
+  15% { opacity: 0.55; }
+  100% { transform: translate(var(--drift, 20px), -340px) scale(2.6); opacity: 0; }
+}
+.ocean-vent-smoke { animation: ventSmoke ease-out infinite; }
+
+@keyframes ventGlow {
+  0%, 100% { opacity: 0.45; transform: scale(1); }
+  50% { opacity: 0.9; transform: scale(1.15); }
+}
+.ocean-vent-glow { animation: ventGlow 2.4s ease-in-out infinite; }
+
+/* Anglerfish lure bob */
+@keyframes lureBob {
+  0%, 100% { transform: translate(0, 0); }
+  50% { transform: translate(4px, -10px); }
+}
+.ocean-lure-bob { animation: lureBob 2.2s ease-in-out infinite; }
+
+/* Jellyfish pulsing bell */
+@keyframes jellyPulse {
+  0%, 100% { transform: scale(1, 1) translateY(0); }
+  35% { transform: scale(1.12, 0.84) translateY(4px); }
+  60% { transform: scale(0.94, 1.08) translateY(-4px); }
+}
+.animate-jelly-pulse { animation: jellyPulse 1.6s ease-in-out infinite; }
+
+/* Respect users who prefer less motion */
+@media (prefers-reduced-motion: reduce) {
+  .ocean-god-ray, .ocean-surface, .ocean-caustic-a, .ocean-caustic-b, .ocean-kelp,
+  .ocean-tentacle, .ocean-swim-bob, .ocean-fish-wiggle, .ocean-manta-flap,
+  .ocean-twinkle, .ocean-vent-glow, .ocean-lure-bob, .animate-jelly-pulse {
+    animation-duration: 0s !important;
+    animation-iteration-count: 1 !important;
+  }
 }
