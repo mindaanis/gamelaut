@@ -11,23 +11,33 @@ import {
   MultiResultRow,
   summarizePlayers,
   summarizeMatches,
-  mergeMultiResults,
   exportMultiResultsToCSV,
   parseMultiResultsCSV
 } from '../../game/multiplayerLeaderboard.ts';
 import { verifyTeacherPassword } from '../../game/teacherAuth.ts';
+import { exportUrl } from '../../game/cloudDb.ts';
 import { AvatarProfile } from '../../types/game.ts';
 import { seaAudio } from '../../game/audio.ts';
 import { COLOR_GRADIENTS } from '../../game/constants.ts';
 
+/** Teacher actions on the shared database. Each one is re-checked by the server with the password. */
+export interface LeaderboardTeacherActions {
+  deleteAvatar: (pwd: string, id: string) => Promise<void>;
+  resetScores: (pwd: string) => Promise<void>;
+  importSingle: (pwd: string, profiles: AvatarProfile[]) => Promise<void>;
+  deleteMultiPlayer: (pwd: string, key: string) => Promise<void>;
+  deleteMultiMatch: (pwd: string, id: string) => Promise<void>;
+  resetMulti: (pwd: string) => Promise<void>;
+  importMulti: (pwd: string, rows: MultiResultRow[]) => Promise<void>;
+}
+
 interface LeaderboardModalProps {
   initialMode?: 'single' | 'multi';
   avatars: AvatarProfile[];
-  onImportAvatars: (imported: AvatarProfile[]) => void;
-  onDeleteAvatar: (id: string) => void;
-  onResetAllScores: () => void;
   multiResults: MultiResultRow[];
-  onMultiResultsChange: (rows: MultiResultRow[]) => void;
+  dbStatus: 'syncing' | 'online' | 'offline';
+  onRefresh: () => Promise<boolean>;
+  teacher: LeaderboardTeacherActions;
   onClose: () => void;
 }
 
@@ -38,7 +48,7 @@ interface PendingConfirm {
   title: string;
   message: string;
   confirmLabel: string;
-  onConfirm: () => void;
+  onConfirm: () => Promise<void> | void;
 }
 
 const downloadCSV = (csv: string, filename: string) => {
@@ -64,11 +74,10 @@ const rowDeleteBtn =
 export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
   initialMode = 'single',
   avatars,
-  onImportAvatars,
-  onDeleteAvatar,
-  onResetAllScores,
   multiResults,
-  onMultiResultsChange,
+  dbStatus,
+  onRefresh,
+  teacher,
   onClose
 }) => {
   const [mode, setMode] = useState<'single' | 'multi'>(initialMode);
@@ -77,15 +86,45 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
   const [feedbackMsg, setFeedbackMsg] = useState<{ text: string; isError?: boolean } | null>(null);
 
   // Teacher management mode (unlocked with the teacher password, only for this modal session)
-  const [teacherMode, setTeacherMode] = useState(false);
+  const [teacherPwd, setTeacherPwd] = useState<string | null>(null);
+  const teacherMode = teacherPwd !== null;
   const [showUnlock, setShowUnlock] = useState(false);
   const [pwd, setPwd] = useState('');
   const [pwdError, setPwdError] = useState<string | null>(null);
   const [pendingConfirm, setPendingConfirm] = useState<PendingConfirm | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
 
   const showFeedback = (text: string, isError = false) => {
     setFeedbackMsg({ text, isError });
-    setTimeout(() => setFeedbackMsg(null), 3500);
+    setTimeout(() => setFeedbackMsg(null), 4000);
+  };
+
+  // Live leaderboard: pull the shared database every 8 s while this modal is open
+  const refresh = React.useCallback(async () => {
+    setRefreshing(true);
+    await onRefresh();
+    setRefreshing(false);
+  }, [onRefresh]);
+  React.useEffect(() => {
+    refresh();
+    const timer = setInterval(refresh, 8000);
+    return () => clearInterval(timer);
+  }, [refresh]);
+
+  /** Runs a teacher action against the server and reports the outcome */
+  const runTeacher = async (action: (pwd: string) => Promise<void>, successMsg: string) => {
+    if (!teacherPwd) return;
+    setBusy(true);
+    try {
+      await action(teacherPwd);
+      showFeedback(successMsg);
+    } catch (e: any) {
+      seaAudio.salahkan();
+      showFeedback(`Gagal: ${e?.message || 'server tidak dapat dihubungi'}`, true);
+    } finally {
+      setBusy(false);
+    }
   };
 
   const askConfirm = (c: PendingConfirm) => {
@@ -97,7 +136,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
     e.preventDefault();
     if (verifyTeacherPassword(pwd)) {
       seaAudio.levelUp();
-      setTeacherMode(true);
+      setTeacherPwd(pwd.trim());
       setShowUnlock(false);
       setPwd('');
       setPwdError(null);
@@ -178,9 +217,10 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
           lastPlayed: u.date || new Date().toISOString()
         };
       });
-      onImportAvatars(importedAvatars);
-      showFeedback(`Berhasil mengimpor ${importedAvatars.length} profil pemain!`);
-      seaAudio.levelUp();
+      runTeacher(
+        (p) => teacher.importSingle(p, importedAvatars),
+        `Berhasil mengimpor ${importedAvatars.length} profil pemain ke database kelas!`
+      );
     };
     reader.readAsText(file);
   };
@@ -208,11 +248,10 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
         seaAudio.salahkan();
         return;
       }
-      const merged = mergeMultiResults(multiResults, res.rows);
-      const added = merged.length - multiResults.length;
-      onMultiResultsChange(merged);
-      showFeedback(`Berhasil menggabungkan ${added} hasil baru (${res.rows.length - added} duplikat dilewati).`);
-      seaAudio.levelUp();
+      runTeacher(
+        (p) => teacher.importMulti(p, res.rows),
+        `Berhasil menggabungkan ${res.rows.length} baris (duplikat otomatis dilewati).`
+      );
     };
     reader.readAsText(file);
   };
@@ -249,7 +288,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                 type="button"
                 onClick={() => {
                   seaAudio.klik();
-                  setTeacherMode(false);
+                  setTeacherPwd(null);
                 }}
                 className="min-h-9 px-3 rounded-xl bg-amber-500/25 border border-amber-400/60 text-[#FFDC00] text-xs font-black cursor-pointer"
                 title="Kunci kembali Mode Guru"
@@ -342,6 +381,32 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
           </button>
         </div>
 
+        {/* Shared database status + CSV database files */}
+        <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] sm:text-xs">
+          <div className="flex items-center gap-2 font-bold">
+            {dbStatus === 'online' && <span className="text-emerald-300">● Database kelas tersambung — semua perangkat melihat data yang sama</span>}
+            {dbStatus === 'syncing' && <span className="text-sky-300">● Menyambungkan ke database kelas...</span>}
+            {dbStatus === 'offline' && <span className="text-amber-300">● Offline — menampilkan data terakhir, hasil baru dikirim saat tersambung</span>}
+            <button
+              type="button"
+              onClick={refresh}
+              disabled={refreshing}
+              className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 cursor-pointer disabled:opacity-50"
+              title="Muat ulang data dari database"
+            >
+              <span className={refreshing ? 'inline-block animate-spin' : ''}>🔄</span>
+            </button>
+          </div>
+          {teacherMode && (
+            <div className="flex flex-wrap items-center gap-1.5">
+              <span className="text-[#b8d4f0]">⬇️ Database CSV:</span>
+              <a href={exportUrl('avatars.csv')} download className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 font-bold">avatars.csv</a>
+              <a href={exportUrl('games.csv')} download className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 font-bold">games.csv</a>
+              <a href={exportUrl('multiplayer.csv')} download className="px-2 py-1 rounded-lg bg-white/10 hover:bg-white/20 border border-white/15 font-bold">multiplayer.csv</a>
+            </div>
+          )}
+        </div>
+
         {/* ═══════════════ SINGLE PLAYER ═══════════════ */}
         {mode === 'single' && (
           <>
@@ -369,10 +434,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                           title: 'Reset semua skor single player?',
                           message: `Skor, mutiara, dan jawaban dari ${avatars.length} avatar akan dikembalikan ke 0. Avatar tetap ada. Tindakan ini tidak bisa dibatalkan.`,
                           confirmLabel: 'Ya, Reset Skor',
-                          onConfirm: () => {
-                            onResetAllScores();
-                            showFeedback('Semua skor single player telah direset.');
-                          }
+                          onConfirm: () => runTeacher((p) => teacher.resetScores(p), 'Semua skor single player telah direset.')
                         })
                       }
                       className={`${dangerBtn} disabled:opacity-40 disabled:cursor-not-allowed`}
@@ -447,12 +509,9 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                                 onClick={() =>
                                   askConfirm({
                                     title: `Hapus ${avt.name}?`,
-                                    message: 'Avatar beserta seluruh skornya akan dihapus dari perangkat ini.',
+                                    message: 'Avatar beserta seluruh riwayat permainan single player-nya akan dihapus dari database kelas (semua perangkat).',
                                     confirmLabel: 'Ya, Hapus',
-                                    onConfirm: () => {
-                                      onDeleteAvatar(avt.id);
-                                      showFeedback(`${avt.name} telah dihapus.`);
-                                    }
+                                    onConfirm: () => runTeacher((p) => teacher.deleteAvatar(p, avt.id), `${avt.name} telah dihapus.`)
                                   })
                                 }
                                 className={rowDeleteBtn}
@@ -490,7 +549,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                 </button>
                 {teacherMode && (
                   <>
-                    <label className={toolbarBtn} title="Gabungkan hasil dari perangkat lain (duplikat dilewati)">
+                    <label className={toolbarBtn} title="Gabungkan hasil dari file CSV (duplikat dilewati)">
                       📤 Gabung CSV
                       <input type="file" accept=".csv" onChange={handleImportMultiCSV} className="hidden" />
                     </label>
@@ -500,12 +559,9 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                       onClick={() =>
                         askConfirm({
                           title: 'Reset peringkat multiplayer?',
-                          message: `Semua ${matchSummaries.length} pertandingan dan ${playerSummaries.length} pemain akan dihapus dari perangkat ini. Disarankan Export CSV terlebih dahulu sebagai cadangan.`,
+                          message: `Semua ${matchSummaries.length} pertandingan dan ${playerSummaries.length} pemain akan dihapus dari database kelas (semua perangkat). Disarankan Export CSV terlebih dahulu sebagai cadangan.`,
                           confirmLabel: 'Ya, Reset Semua',
-                          onConfirm: () => {
-                            onMultiResultsChange([]);
-                            showFeedback('Peringkat multiplayer telah direset.');
-                          }
+                          onConfirm: () => runTeacher((p) => teacher.resetMulti(p), 'Peringkat multiplayer telah direset.')
                         })
                       }
                       className={`${dangerBtn} disabled:opacity-40 disabled:cursor-not-allowed`}
@@ -519,7 +575,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
 
             <div className="text-[11px] sm:text-xs text-[#a0c8f0] bg-black/25 px-3.5 py-2 rounded-xl border border-white/5">
               ⚔️ Peringkat berdasarkan <strong>skor terbaik</strong> (maks 1000 = jawaban benar 500 + mutiara 200 + bonus waktu 300), lalu jumlah kemenangan.
-              Setiap perangkat mencatat pertandingannya sendiri — guru bisa <strong>Export</strong> dari tiap perangkat lalu <strong>Gabung CSV</strong> di satu perangkat.
+              Semua pertandingan dari semua perangkat tersimpan di satu database kelas.
             </div>
 
             {multiTab === 'players' ? (
@@ -542,7 +598,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                     {playerSummaries.length === 0 ? (
                       <tr>
                         <td colSpan={teacherMode ? 9 : 8} className="p-8 text-center text-[#b8d4f0]">
-                          Belum ada pertandingan multiplayer yang tercatat di perangkat ini.
+                          Belum ada pertandingan multiplayer yang tercatat.
                         </td>
                       </tr>
                     ) : (
@@ -577,10 +633,8 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                                     title: `Hapus ${p.name} dari peringkat multiplayer?`,
                                     message: `Semua ${p.matches} hasil pertandingan milik ${p.name} akan dihapus. Hasil lawannya tetap tercatat.`,
                                     confirmLabel: 'Ya, Hapus',
-                                    onConfirm: () => {
-                                      onMultiResultsChange(multiResults.filter((r) => r.playerKey !== p.playerKey));
-                                      showFeedback(`${p.name} dihapus dari peringkat multiplayer.`);
-                                    }
+                                    onConfirm: () =>
+                                      runTeacher((pw) => teacher.deleteMultiPlayer(pw, p.playerKey), `${p.name} dihapus dari peringkat multiplayer.`)
                                   })
                                 }
                                 className={rowDeleteBtn}
@@ -639,10 +693,7 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
                               title: 'Hapus pertandingan ini?',
                               message: `Hasil ${m.rows.map((r) => r.name).join(' vs ')} (Zona ${m.level}, ${shortDate(m.date)}) akan dihapus.`,
                               confirmLabel: 'Ya, Hapus',
-                              onConfirm: () => {
-                                onMultiResultsChange(multiResults.filter((r) => r.matchId !== m.matchId));
-                                showFeedback('Pertandingan dihapus.');
-                              }
+                              onConfirm: () => runTeacher((p) => teacher.deleteMultiMatch(p, m.matchId), 'Pertandingan dihapus.')
                             })
                           }
                           className={`${rowDeleteBtn} self-end sm:self-center`}
@@ -680,12 +731,13 @@ export const LeaderboardModal: React.FC<LeaderboardModalProps> = ({
               </button>
               <button
                 type="button"
-                onClick={() => {
+                disabled={busy}
+                onClick={async () => {
                   seaAudio.klik();
-                  pendingConfirm.onConfirm();
+                  await pendingConfirm.onConfirm();
                   setPendingConfirm(null);
                 }}
-                className="py-3 rounded-xl font-bold text-xs sm:text-sm bg-rose-600 hover:bg-rose-500 text-white cursor-pointer"
+                className="py-3 rounded-xl font-bold text-xs sm:text-sm bg-rose-600 hover:bg-rose-500 disabled:opacity-50 text-white cursor-pointer"
               >
                 {pendingConfirm.confirmLabel}
               </button>

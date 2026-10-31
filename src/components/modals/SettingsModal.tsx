@@ -81,14 +81,13 @@ export const SettingsModal: React.FC<SettingsModalProps> = ({
           <div className="flex items-center justify-between bg-red-500/15 p-4 rounded-2xl border border-red-500/35">
             <div>
               <strong className="block text-sm text-red-400">Reset Data Permainan:</strong>
-              <span className="text-xs text-[#b8d4f0]">Menghapus rekor lokal dan mengunci kembali Level 2 & 3.</span>
+              <span className="text-xs text-[#b8d4f0]">Mereset perangkat ini saja (avatar aktif, bank soal lokal, kunci Level 2 & 3). Papan peringkat kelas tetap aman — guru mengelolanya lewat Papan Peringkat › Kelola (Guru).</span>
             </div>
             <button
               type="button"
               onClick={() => {
-                if (confirm('Yakin ingin mereset seluruh data riwayat skor dan kunci level?')) {
+                if (confirm('Yakin ingin mereset data di perangkat ini (avatar aktif & kunci level)?')) {
                   onResetData();
-                  alert('Data permainan telah direset bersih.');
                 }
               }}
               className="px-4 py-2 rounded-xl bg-red-600 hover:bg-red-700 text-white font-bold text-xs transition-all cursor-pointer"

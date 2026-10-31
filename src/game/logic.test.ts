@@ -235,3 +235,37 @@ test('multiplayer leaderboard: merge dedupes, summary ranks by best score, CSV r
   );
   assert.equal(left.winner, 2);
 });
+
+test('shared database: totals derived from game rows, game-over not ranked, CSV roundtrip', async () => {
+  const db = await import('./database.ts');
+  const avatars = [
+    { id: 'A1', name: 'Ana, "si cepat"', emoji: '🐬', color: 'gold' as const, createdAt: '2026-10-31T08:00:00.000Z' },
+    { id: 'A2', name: 'Budi', emoji: '🐠', color: 'blue' as const, createdAt: '2026-10-31T08:00:00.000Z' }
+  ];
+  const g = (gameId: string, avatarId: string, level: number, score: number, status: 'finished' | 'eliminated' = 'finished') => ({
+    gameId, avatarId, level, score, pearls: 2, correct: 4, wrong: 1, timeMs: 1000, status, date: `2026-10-31T1${level}:00:00.000Z`
+  });
+  let games = db.addGames([], [g('g1', 'A1', 1, 700), g('g2', 'A1', 1, 800), g('g3', 'A1', 2, 650), g('g4', 'A1', 3, 900, 'eliminated')]);
+  games = db.addGames(games, [g('g1', 'A1', 1, 700)]); // retry of the same game is ignored
+  assert.equal(games.length, 4);
+
+  const [ana, budi] = db.buildAvatarProfiles(avatars, games);
+  assert.equal(ana.totalScore, 700 + 800 + 650);
+  assert.equal(ana.gamesPlayed, 3);
+  assert.deepEqual(ana.zoneScores, { 1: 800, 2: 650, 3: 0 });
+  assert.deepEqual(ana.playedZones, [1, 2]);
+  assert.equal(budi.totalScore, 0);
+
+  assert.deepEqual(db.avatarsFromCSV(db.avatarsToCSV(avatars)), avatars);
+  assert.deepEqual(db.gamesFromCSV(db.gamesToCSV(games)), games);
+
+  // Old per-device data becomes one avatar + one "level 0" totals row
+  const legacy = db.legacyProfilesToRecords([{ ...ana, id: 'OLD', totalScore: 120, totalPearls: 3 }]);
+  assert.equal(legacy.avatars[0].id, 'OLD');
+  assert.equal(legacy.games[0].gameId, 'legacy-OLD');
+  assert.equal(legacy.games[0].level, 0);
+
+  // Sanitizing rejects junk
+  assert.equal(db.sanitizeAvatar({ id: '', name: 'x' }), null);
+  assert.equal(db.sanitizeGame({ gameId: 'x', avatarId: 'A1', score: -5 })!.score, 0);
+});

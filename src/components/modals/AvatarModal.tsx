@@ -8,7 +8,7 @@ interface AvatarModalProps {
   activeAvatarId: string | null;
   onSelectAvatar: (avatarId: string) => void;
   onCreateAvatar: (avatar: AvatarProfile) => boolean;
-  onDeleteAvatar: (avatarId: string) => void;
+  dbStatus: 'syncing' | 'online' | 'offline';
   onClose: () => void;
 }
 
@@ -17,9 +17,18 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
   activeAvatarId,
   onSelectAvatar,
   onCreateAvatar,
-  onDeleteAvatar,
+  dbStatus,
   onClose
 }) => {
+  const [search, setSearch] = useState('');
+  const visibleAvatars = React.useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const list = q ? avatars.filter((a) => a.name.toLowerCase().includes(q)) : avatars;
+    // Active avatar first, then alphabetical
+    return [...list].sort((a, b) =>
+      a.id === activeAvatarId ? -1 : b.id === activeAvatarId ? 1 : a.name.localeCompare(b.name)
+    );
+  }, [avatars, search, activeAvatarId]);
   // If no avatars exist yet, default directly to create mode
   const [isCreating, setIsCreating] = useState(avatars.length === 0);
   const [name, setName] = useState('');
@@ -129,11 +138,26 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
         {!isCreating && avatars.length > 0 && (
           <div className="flex flex-col gap-3">
             <p className="text-xs text-[#b8d4f0]">
-              Pilih avatar yang ingin kamu mainkan. Semua skor dan mutiara melekat pada avatar masing-masing:
+              Daftar avatar ini dipakai bersama oleh semua perangkat. Pilih avatar milikmu — skor dan mutiara tersimpan di database kelas.
+            </p>
+            <p className="text-[11px] font-bold">
+              {dbStatus === 'online' && <span className="text-emerald-300">● Tersambung ke database kelas</span>}
+              {dbStatus === 'syncing' && <span className="text-sky-300">● Menyambungkan ke database...</span>}
+              {dbStatus === 'offline' && <span className="text-amber-300">● Offline — data akan dikirim saat tersambung kembali</span>}
             </p>
 
+            {avatars.length > 6 && (
+              <input
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                placeholder="🔍 Cari nama avatar..."
+                className="w-full px-3 py-2 rounded-xl bg-[#001024] border border-white/20 text-sm text-white focus:outline-none focus:border-[#39CCCC]"
+              />
+            )}
+
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3.5 max-h-[380px] overflow-y-auto p-1">
-              {avatars.map((avt) => {
+              {visibleAvatars.map((avt) => {
                 const isActive = avt.id === activeAvatarId;
                 return (
                   <div
@@ -188,19 +212,6 @@ export const AvatarModal: React.FC<AvatarModalProps> = ({
                           className="flex-1 py-2 px-3 rounded-xl font-bold text-xs bg-gradient-to-r from-[#39CCCC] to-[#0074D9] text-white hover:brightness-110 active:scale-95 transition-all cursor-pointer shadow"
                         >
                           Ganti ke Avatar Ini ➔
-                        </button>
-                      )}
-
-                      {avatars.length > 1 && (
-                        <button
-                          onClick={() => {
-                            seaAudio.klik();
-                            onDeleteAvatar(avt.id);
-                          }}
-                          title="Hapus Avatar"
-                          className="w-8 h-8 rounded-xl bg-white/10 hover:bg-rose-600/80 text-white/70 hover:text-white flex items-center justify-center text-xs cursor-pointer transition-colors"
-                        >
-                          🗑️
                         </button>
                       )}
                     </div>

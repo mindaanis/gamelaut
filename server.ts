@@ -4,6 +4,8 @@ import { WebSocketServer, WebSocket } from 'ws';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import { fileURLToPath } from 'url';
+import { handleDbRequest } from './api/dbHandler.ts';
+import { createCsvFileStorage } from './api/csvFileStorage.ts';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -12,7 +14,7 @@ const app = express();
 const server = http.createServer(app);
 const port = process.env.PORT || 3000;
 
-app.use(express.json());
+app.use(express.json({ limit: '2mb' }));
 
 // In-memory Multiplayer Rooms
 interface PlayerState {
@@ -265,6 +267,25 @@ wss.on('connection', (ws: WebSocket) => {
       }
     }
   });
+});
+
+// ═══════════════════════════════════════════════
+// Shared CSV database (same API as the Netlify Function), stored in ./data/*.csv
+// ═══════════════════════════════════════════════
+const fileStorage = createCsvFileStorage(path.resolve(__dirname, 'data'));
+
+app.all(/^\/api\/db(\/.*)?$/, async (req, res) => {
+  const result = await handleDbRequest(
+    {
+      method: req.method,
+      path: req.path.replace(/^\/api\/db/, ''),
+      body: req.body,
+      teacherPassword: req.get('x-teacher-password') || null,
+      teacherPasswordEnv: process.env.TEACHER_PASSWORD
+    },
+    fileStorage
+  );
+  res.status(result.status).set({ 'content-type': result.contentType, ...(result.headers || {}) }).send(result.body);
 });
 
 // REST Endpoint to check room status (for devices with strict WS proxies)

@@ -1,5 +1,5 @@
 // Valid passwords: custom (pa_teacher_pwd) or standard presets for PGRI & Wonogiri teachers
-const PRESET_TEACHER_PASSWORDS = [
+export const PRESET_TEACHER_PASSWORDS = [
   'GURUPGRI2026',
   'guru2026',
   'PGRI81',

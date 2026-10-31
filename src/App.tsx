@@ -25,13 +25,22 @@ import {
   PlayerStats,
   PlayerResult
 } from './types/game.ts';
+import { MultiResultRow, loadMultiResults, resolveMatch } from './game/multiplayerLeaderboard.ts';
 import {
-  MultiResultRow,
-  loadMultiResults,
-  saveMultiResults,
-  mergeMultiResults,
-  resolveMatch
-} from './game/multiplayerLeaderboard.ts';
+  DbOp,
+  DbState,
+  buildAvatarProfiles,
+  legacyProfilesToRecords
+} from './game/database.ts';
+import {
+  loadLocalDb,
+  syncDb,
+  queueOp,
+  upsertAvatarOp,
+  addGamesOp,
+  addMultiOp,
+  teacherApi
+} from './game/cloudDb.ts';
 import { seaAudio } from './game/audio.ts';
 
 import { multiplayerNet } from './game/multiplayerNetwork.ts';
@@ -42,7 +51,8 @@ const STORAGE_KEYS = {
   OLD_AVATAR: 'pa_avatar', // For migration
   SOUND: 'pa_sound',
   QUESTIONS: 'pa_questions',
-  UNLOCKED_LEVELS: 'pa_unlocked_levels'
+  UNLOCKED_LEVELS: 'pa_unlocked_levels',
+  DB_MIGRATED: 'pa_db_migrated'
 };
 
 function loadStorage<T>(key: string, fallback: T): T {
@@ -60,60 +70,102 @@ function saveStorage<T>(key: string, data: T) {
   } catch {}
 }
 
+/**
+ * One-time upload of data saved by older versions of the app (per-device avatars & multiplayer
+ * results in localStorage) into the shared database outbox.
+ */
+function migrateLegacyLocalData() {
+  if (loadStorage<boolean>(STORAGE_KEYS.DB_MIGRATED, false)) return;
+  saveStorage(STORAGE_KEYS.DB_MIGRATED, true);
+
+  let profiles = loadStorage<AvatarProfile[]>(STORAGE_KEYS.AVATARS_LIST, []);
+  const old = loadStorage<any>(STORAGE_KEYS.OLD_AVATAR, null);
+  if (profiles.length === 0 && old && old.name) {
+    profiles = [{
+      id: `AVT-${Date.now()}`,
+      name: old.name,
+      emoji: old.emoji || '🐠',
+      color: old.color || 'blue',
+      totalScore: 0,
+      totalPearls: 0,
+      totalCorrect: 0,
+      totalWrong: 0,
+      gamesPlayed: 0,
+      zoneScores: { 1: 0, 2: 0, 3: 0 },
+      createdAt: new Date().toISOString(),
+      lastPlayed: new Date().toISOString()
+    }];
+  }
+
+  let state = loadLocalDb();
+  const { avatars, games } = legacyProfilesToRecords(profiles);
+  avatars.forEach((a) => { state = queueOp(state, upsertAvatarOp(a)); });
+  if (games.length) state = queueOp(state, addGamesOp(games));
+  const multi = loadMultiResults();
+  if (multi.length) queueOp(state, addMultiOp(multi));
+}
+
 export default function App() {
   // Page Router
   const [currentPage, setCurrentPage] = useState<ActivePage>('splash');
   const [currentModal, setCurrentModal] = useState<ModalType>(null);
   const [toastMessage, setToastMessage] = useState<string | null>(null);
 
-  // Persistence State: Multiple Avatars System
-  const [avatars, setAvatars] = useState<AvatarProfile[]>(() => {
-    const list = loadStorage<AvatarProfile[]>(STORAGE_KEYS.AVATARS_LIST, []);
-    if (list.length > 0) {
-      return list.map((a) => {
-        if (!a.playedZones) {
-          const pz: number[] = [];
-          if ((a.zoneScores?.[1] || 0) > 0) pz.push(1);
-          if ((a.zoneScores?.[2] || 0) > 0) pz.push(2);
-          if ((a.zoneScores?.[3] || 0) > 0) pz.push(3);
-          return { ...a, playedZones: pz };
-        }
-        return a;
-      });
-    }
-
-    // Check legacy avatar migration
-    const old = loadStorage<any>(STORAGE_KEYS.OLD_AVATAR, null);
-    if (old && old.name) {
-      const migrated: AvatarProfile = {
-        id: `AVT-${Date.now()}`,
-        name: old.name,
-        emoji: old.emoji || '🐠',
-        color: old.color || 'blue',
-        totalScore: 0,
-        totalPearls: 0,
-        totalCorrect: 0,
-        totalWrong: 0,
-        gamesPlayed: 0,
-        playedZones: [],
-        zoneScores: { 1: 0, 2: 0, 3: 0 },
-        createdAt: new Date().toISOString(),
-        lastPlayed: new Date().toISOString()
-      };
-      saveStorage(STORAGE_KEYS.AVATARS_LIST, [migrated]);
-      return [migrated];
-    }
-    return [];
+  // ═══════════════════════════════════════════════
+  // SHARED CSV DATABASE (all devices): registered avatars, single-player game records,
+  // multiplayer results. Local changes are applied instantly and synced via an outbox.
+  // ═══════════════════════════════════════════════
+  const [db, setDb] = useState<DbState>(() => {
+    migrateLegacyLocalData();
+    return loadLocalDb();
   });
+  const dbRef = useRef(db);
+  const [dbStatus, setDbStatus] = useState<'syncing' | 'online' | 'offline'>('syncing');
+
+  const avatars = React.useMemo(() => buildAvatarProfiles(db.avatars, db.games), [db.avatars, db.games]);
+  const multiResults = db.multi;
+
+  // Side effects (outbox) stay outside the state updater so they never run twice
+  const applyDbChange = (op: DbOp) => {
+    const next = queueOp(dbRef.current, op);
+    dbRef.current = next;
+    setDb(next);
+  };
+
+  const refreshDb = useCallback(async () => {
+    try {
+      const next = await syncDb();
+      dbRef.current = next;
+      setDb(next);
+      setDbStatus('online');
+      return true;
+    } catch {
+      setDbStatus('offline');
+      return false;
+    }
+  }, []);
+
+  // Sync on start, when the tab regains focus / network, and every 30 s
+  useEffect(() => {
+    refreshDb();
+    const onWake = () => refreshDb();
+    window.addEventListener('focus', onWake);
+    window.addEventListener('online', onWake);
+    const timer = setInterval(refreshDb, 30000);
+    return () => {
+      window.removeEventListener('focus', onWake);
+      window.removeEventListener('online', onWake);
+      clearInterval(timer);
+    };
+  }, [refreshDb]);
 
   const [activeAvatarId, setActiveAvatarId] = useState<string | null>(() => {
     return loadStorage<string | null>(STORAGE_KEYS.ACTIVE_AVATAR_ID, null);
   });
 
-  // Current active avatar
+  // Current active avatar on THIS device (the list is shared, so never auto-pick someone else's)
   const activeAvatar = React.useMemo(() => {
-    if (!avatars || avatars.length === 0) return null;
-    return avatars.find((a) => a.id === activeAvatarId) || avatars[0];
+    return avatars.find((a) => a.id === activeAvatarId) || null;
   }, [avatars, activeAvatarId]);
 
   // Sound & Questions
@@ -139,7 +191,6 @@ export default function App() {
   // Multiplayer match tracking (opponent may still be playing after we finish)
   const [matchId, setMatchId] = useState<string | null>(null);
   const [opponentResult, setOpponentResult] = useState<PlayerResult | null>(null);
-  const [multiResults, setMultiResults] = useState<MultiResultRow[]>(() => loadMultiResults());
 
   const [leaderboardMode, setLeaderboardMode] = useState<'single' | 'multi'>('single');
 
@@ -149,11 +200,6 @@ export default function App() {
     setFinalP2(null);
     setIsGameOver(false);
     setOpponentResult(null);
-  };
-
-  const updateMultiResults = (next: MultiResultRow[]) => {
-    setMultiResults(next);
-    saveMultiResults(next);
   };
 
   // Multiplayer State (P2P Cloud + WebSockets + BroadcastChannel)
@@ -247,27 +293,37 @@ export default function App() {
     }
   };
 
+  // New avatars are registered in the shared database so every device sees them
   const handleCreateAvatar = (newAvatar: AvatarProfile): boolean => {
-    const updated = [...avatars, newAvatar];
-    setAvatars(updated);
+    applyDbChange(
+      upsertAvatarOp({
+        id: newAvatar.id,
+        name: newAvatar.name,
+        emoji: newAvatar.emoji,
+        color: newAvatar.color,
+        createdAt: newAvatar.createdAt
+      })
+    );
     setActiveAvatarId(newAvatar.id);
-    saveStorage(STORAGE_KEYS.AVATARS_LIST, updated);
     saveStorage(STORAGE_KEYS.ACTIVE_AVATAR_ID, newAvatar.id);
     showToast(`Avatar ${newAvatar.name} berhasil dibuat!`);
     return true;
   };
 
-  const handleDeleteAvatar = (id: string) => {
-    const updated = avatars.filter(a => a.id !== id);
-    setAvatars(updated);
-    saveStorage(STORAGE_KEYS.AVATARS_LIST, updated);
-    if (activeAvatarId === id) {
-      const nextActive = updated.length > 0 ? updated[0].id : null;
-      setActiveAvatarId(nextActive);
-      saveStorage(STORAGE_KEYS.ACTIVE_AVATAR_ID, nextActive);
-    }
-    showToast('Avatar telah dihapus.');
+  // Teacher-only (password checked again by the server)
+  const runTeacherAction = async (action: () => Promise<unknown>) => {
+    await action();
+    await refreshDb();
   };
+
+  const handleTeacherDeleteAvatar = (pwd: string, id: string) =>
+    runTeacherAction(async () => {
+      await teacherApi.deleteAvatar(pwd, id);
+      if (activeAvatarId === id) {
+        setActiveAvatarId(null);
+        saveStorage(STORAGE_KEYS.ACTIVE_AVATAR_ID, null);
+      }
+    });
 
   const activeAvatarRef = useRef(activeAvatar);
   useEffect(() => {
@@ -421,11 +477,7 @@ export default function App() {
       toRow(me, verdict.winner === 1 ? 'menang' : verdict.winner === 2 ? 'kalah' : 'seri', opponentDisplay.name),
       toRow(opponentDisplay, verdict.winner === 2 ? 'menang' : verdict.winner === 1 ? 'kalah' : 'seri', me.name)
     ];
-    setMultiResults((prev) => {
-      const next = mergeMultiResults(prev, rows);
-      saveMultiResults(next);
-      return next;
-    });
+    applyDbChange(addMultiOp(rows));
 
     if (currentPage !== 'results') {
       showToast(`Pertandingan selesai: ${verdict.message}`);
@@ -517,37 +569,28 @@ export default function App() {
       return;
     }
 
-    // If game over, DO NOT RECORD to leaderboard or avatar (Sesuai Permintaan: peringkat tidak dicatat)
+    // Every game is saved as a row in the shared games.csv. Game-over rows are kept as a
+    // record for the teacher but are not counted in the ranking (peringkat tidak dicatat).
+    if (activeAvatar) {
+      applyDbChange(
+        addGamesOp([
+          {
+            gameId: `G-${activeAvatar.id}-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+            avatarId: activeAvatar.id,
+            level: currentLevel,
+            score: p1Stats.score,
+            pearls: p1Stats.pearls || 0,
+            correct: p1Stats.correct,
+            wrong: p1Stats.wrong,
+            timeMs: p1Stats.timeMs || 0,
+            status: gameOverState ? 'eliminated' : 'finished',
+            date: new Date().toISOString()
+          }
+        ])
+      );
+    }
+
     if (!gameOverState && activeAvatar) {
-      const sessionTotal = p1Stats.score; // Already includes question points + pearls * 10
-      const sessionPearls = p1Stats.pearls || 0;
-
-      // Update avatar: all points and pearls permanently attach to this unique avatar!
-      const updatedAvatars = avatars.map((a) => {
-        if (a.id === activeAvatar.id) {
-          const currentZoneBest = a.zoneScores?.[currentLevel as 1 | 2 | 3] || 0;
-          const currentPlayed = Array.from(new Set([...(a.playedZones || []), currentLevel]));
-          return {
-            ...a,
-            totalScore: a.totalScore + sessionTotal,
-            totalPearls: a.totalPearls + sessionPearls,
-            totalCorrect: a.totalCorrect + p1Stats.correct,
-            totalWrong: a.totalWrong + p1Stats.wrong,
-            gamesPlayed: a.gamesPlayed + 1,
-            playedZones: currentPlayed,
-            zoneScores: {
-              ...a.zoneScores,
-              [currentLevel]: Math.max(currentZoneBest, sessionTotal)
-            },
-            lastPlayed: new Date().toISOString()
-          };
-        }
-        return a;
-      });
-
-      setAvatars(updatedAvatars);
-      saveStorage(STORAGE_KEYS.AVATARS_LIST, updatedAvatars);
-
       // Unlock next level if Level 1/2 completed with >= 3 correct answers
       if (p1Stats.correct >= 3) {
         if (currentLevel === 1 && !unlockedLevels.includes(2)) {
@@ -694,7 +737,7 @@ export default function App() {
           activeAvatarId={activeAvatar?.id || null}
           onSelectAvatar={handleSelectAvatar}
           onCreateAvatar={handleCreateAvatar}
-          onDeleteAvatar={handleDeleteAvatar}
+          dbStatus={dbStatus}
           onClose={() => setCurrentModal(null)}
         />
       )}
@@ -749,14 +792,20 @@ export default function App() {
             }
           }}
           onResetData={() => {
+            // Resets THIS device only. The shared leaderboard database stays on the server
+            // (teachers manage it from the leaderboard's Mode Guru).
+            const unsent = localStorage.getItem('pa_db_outbox'); // keep results not yet uploaded
             localStorage.clear();
-            setAvatars([]);
+            if (unsent) localStorage.setItem('pa_db_outbox', unsent);
+            saveStorage(STORAGE_KEYS.DB_MIGRATED, true);
             setActiveAvatarId(null);
             setUnlockedLevels([1]);
             setQuestions(DEFAULT_QUESTIONS);
-            setMultiResults([]);
+            dbRef.current = loadLocalDb();
+            setDb(dbRef.current);
+            refreshDb();
             setCurrentModal(null);
-            showToast('Semua data berhasil direset.');
+            showToast('Data perangkat ini berhasil direset.');
           }}
           onClose={() => setCurrentModal(null)}
         />
@@ -789,31 +838,19 @@ export default function App() {
         <LeaderboardModal
           initialMode={leaderboardMode}
           avatars={avatars}
-          onImportAvatars={(imported) => {
-            setAvatars(imported);
-            saveStorage(STORAGE_KEYS.AVATARS_LIST, imported);
-            if (imported.length > 0 && !activeAvatarId) {
-              setActiveAvatarId(imported[0].id);
-              saveStorage(STORAGE_KEYS.ACTIVE_AVATAR_ID, imported[0].id);
-            }
-          }}
-          onDeleteAvatar={handleDeleteAvatar}
-          onResetAllScores={() => {
-            const reset = avatars.map((a) => ({
-              ...a,
-              totalScore: 0,
-              totalPearls: 0,
-              totalCorrect: 0,
-              totalWrong: 0,
-              gamesPlayed: 0,
-              playedZones: [],
-              zoneScores: { 1: 0, 2: 0, 3: 0 }
-            }));
-            setAvatars(reset);
-            saveStorage(STORAGE_KEYS.AVATARS_LIST, reset);
-          }}
           multiResults={multiResults}
-          onMultiResultsChange={updateMultiResults}
+          dbStatus={dbStatus}
+          onRefresh={refreshDb}
+          teacher={{
+            deleteAvatar: handleTeacherDeleteAvatar,
+            resetScores: (pwd) => runTeacherAction(() => teacherApi.resetGames(pwd)),
+            importSingle: (pwd, profiles) =>
+              runTeacherAction(() => teacherApi.importData(pwd, legacyProfilesToRecords(profiles))),
+            deleteMultiPlayer: (pwd, key) => runTeacherAction(() => teacherApi.deleteMultiPlayer(pwd, key)),
+            deleteMultiMatch: (pwd, id) => runTeacherAction(() => teacherApi.deleteMultiMatch(pwd, id)),
+            resetMulti: (pwd) => runTeacherAction(() => teacherApi.resetMulti(pwd)),
+            importMulti: (pwd, rows) => runTeacherAction(() => teacherApi.importData(pwd, { multi: rows }))
+          }}
           onClose={() => {
             setLeaderboardMode('single');
             setCurrentModal(null);
