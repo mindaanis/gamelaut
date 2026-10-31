@@ -1,0 +1,6 @@
+{
+  "name": "Petualangan Pecahan Bawah Laut",
+  "description": "Game edukasi interaktif matematika pecahan bawah laut untuk siswa SD kelas 4-6 dengan tema petualangan ikan cerdas, bank soal CSV, dan leaderboard.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
