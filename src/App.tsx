@@ -136,7 +136,16 @@ export default function App() {
   const [isHost, setIsHost] = useState(true);
   const [p1Info, setP1Info] = useState<{ name: string; avatar: string }>({ name: 'Host', avatar: '🐠' });
   const [p2Info, setP2Info] = useState<{ name: string; avatar: string }>({ name: 'Lawan', avatar: '🐬' });
-  const [incomingMultiEvent, setIncomingMultiEvent] = useState<any>(null);
+  const isHostRef = useRef(true);
+  const localPlayerIdRef = useRef<string | null>(null);
+  const multiListenersRef = useRef(new Set<(msg: any) => void>());
+
+  const subscribeMultiplayerEvents = useCallback((handler: (msg: any) => void) => {
+    multiListenersRef.current.add(handler);
+    return () => {
+      multiListenersRef.current.delete(handler);
+    };
+  }, []);
 
   // Keep Audio Engine in sync
   useEffect(() => {
@@ -242,27 +251,47 @@ export default function App() {
     soundEnabledRef.current = soundEnabled;
   }, [soundEnabled]);
 
+  // Find the other player's info in a room message. Uses player ids so it stays correct
+  // even if a transport (e.g. the WS server) assigned slots differently than the local role.
+  const pickOpponentInfo = (msg: any): { name: string; avatar: string } | null => {
+    const candidates = [msg.p1, msg.p2].filter((p: any) => p && p.name);
+    const myId = localPlayerIdRef.current;
+    const byId = candidates.find((p: any) => p.id && myId && p.id !== myId);
+    const fallback = isHostRef.current ? msg.p2 : msg.p1;
+    const other = byId || (fallback && (!fallback.id || fallback.id !== myId) ? fallback : null);
+    return other ? { name: other.name, avatar: other.avatar } : null;
+  };
+
+  const applyRoomPlayers = (msg: any) => {
+    const self = {
+      name: activeAvatarRef.current?.name || (isHostRef.current ? 'Pemain 1' : 'Pemain 2'),
+      avatar: activeAvatarRef.current?.emoji || (isHostRef.current ? '🐠' : '🐬')
+    };
+    const opponent = pickOpponentInfo(msg);
+    if (isHostRef.current) {
+      setP1Info(self);
+      if (opponent) setP2Info(opponent);
+    } else {
+      setP2Info(self);
+      if (opponent) setP1Info(opponent);
+    }
+    return opponent;
+  };
+
   // Handle Multiplayer Message (Listens for room join, room ready, and game start)
   const handleIncomingWsMessage = useCallback((msg: any) => {
     if (!msg || typeof msg !== 'object') return;
 
     if (msg.type === 'room-joined') {
       setRoomConnected(true);
-      if (msg.role === 'p1') {
-        setIsHost(true);
-        setRoomStatus('waiting');
-        setP1Info({ name: activeAvatarRef.current?.name || 'Pemain 1', avatar: activeAvatarRef.current?.emoji || '🐠' });
-      } else {
-        setIsHost(false);
-        setRoomStatus('ready');
-        if (msg.p1) setP1Info(msg.p1);
-        setP2Info({ name: activeAvatarRef.current?.name || 'Pemain 2', avatar: activeAvatarRef.current?.emoji || '🐬' });
-      }
+      // Local role is decided by the player's choice (host/guest), not by whichever transport answered first
+      setIsHost(isHostRef.current);
+      const opponent = applyRoomPlayers(msg);
+      setRoomStatus(isHostRef.current && !opponent ? 'waiting' : 'ready');
     } else if (msg.type === 'room-ready') {
       setRoomConnected(true);
       setRoomStatus('ready');
-      if (msg.p1) setP1Info(msg.p1);
-      if (msg.p2) setP2Info(msg.p2);
+      applyRoomPlayers(msg);
       seaAudio.levelUp();
     } else if (msg.type === 'game-started' || msg.type === 'start-game' || msg.type === 'start_game') {
       setCurrentModal(null);
@@ -271,7 +300,7 @@ export default function App() {
       setCurrentPage('gameplay');
       if (soundEnabledRef.current) seaAudio.startBGM();
     } else {
-      setIncomingMultiEvent(msg);
+      multiListenersRef.current.forEach((handler) => handler(msg));
     }
   }, []);
 
@@ -279,10 +308,13 @@ export default function App() {
   const handleJoinOrCreateRoom = (roomId: string, level: number, asHost: boolean) => {
     setCurrentRoomId(roomId);
     setIsHost(asHost);
+    isHostRef.current = asHost;
     setCurrentLevel(level);
 
+    const playerId = `P-${Date.now()}-${Math.random().toString(36).substring(2, 7)}`;
+    localPlayerIdRef.current = playerId;
     const playerPayload = {
-      id: `P-${Date.now()}`,
+      id: playerId,
       name: activeAvatar?.name || (asHost ? 'Pemain 1' : 'Pemain 2'),
       avatar: activeAvatar?.emoji || (asHost ? '🐠' : '🐬'),
       color: activeAvatar?.color || 'blue'
@@ -473,7 +505,7 @@ export default function App() {
             emoji: activeAvatar?.emoji || '🐠',
             color: activeAvatar?.color || 'blue'
           }}
-          p2Profile={p2Info}
+          p2Profile={isHost ? p2Info : p1Info}
           questions={questions}
           onExitGame={() => {
             seaAudio.stopBGM();
@@ -481,7 +513,7 @@ export default function App() {
           }}
           onFinishGame={handleFinishGame}
           broadcastEvent={broadcastMultiplayerEvent}
-          incomingMultiplayerEvent={incomingMultiEvent}
+          subscribeMultiplayerEvents={subscribeMultiplayerEvents}
         />
       )}
 

@@ -61,6 +61,10 @@ function broadcastToRoom(room: RoomState, message: any, excludeWs?: WebSocket) {
   }
 }
 
+function publicPlayer(p: PlayerState | null) {
+  return p ? { id: p.id, name: p.name, avatar: p.avatar, color: p.color } : null;
+}
+
 wss.on('connection', (ws: WebSocket) => {
   let currentRoomId: string | null = null;
   let playerSlot: 'p1' | 'p2' | null = null;
@@ -103,7 +107,7 @@ wss.on('connection', (ws: WebSocket) => {
             roomId: targetRoomId,
             role: 'p1',
             status: 'waiting',
-            p1: { name: room.p1!.name, avatar: room.p1!.avatar, color: room.p1!.color },
+            p1: publicPlayer(room.p1),
             p2: null
           }));
         } else if (!room.p2) {
@@ -130,16 +134,16 @@ wss.on('connection', (ws: WebSocket) => {
             role: 'p2',
             status: 'ready',
             level: room.level,
-            p1: { name: room.p1!.name, avatar: room.p1!.avatar, color: room.p1!.color },
-            p2: { name: room.p2.name, avatar: room.p2.avatar, color: room.p2.color }
+            p1: publicPlayer(room.p1),
+            p2: publicPlayer(room.p2)
           }));
 
           // Notify P1 that P2 joined and room is ready to start!
           broadcastToRoom(room, {
             type: 'room-ready',
             roomId: targetRoomId,
-            p1: { name: room.p1!.name, avatar: room.p1!.avatar, color: room.p1!.color },
-            p2: { name: room.p2.name, avatar: room.p2.avatar, color: room.p2.color }
+            p1: publicPlayer(room.p1),
+            p2: publicPlayer(room.p2)
           });
         } else {
           // Room full
@@ -158,24 +162,18 @@ wss.on('connection', (ws: WebSocket) => {
           broadcastToRoom(room, {
             type: 'game-started',
             level: room.level,
-            p1: { name: room.p1!.name, avatar: room.p1!.avatar },
-            p2: { name: room.p2!.name, avatar: room.p2!.avatar }
+            p1: publicPlayer(room.p1),
+            p2: publicPlayer(room.p2)
           });
         }
       }
 
-      // Synchronize player coordinates across devices
-      if (type === 'player-pos' && currentRoomId) {
+      // Relay live gameplay events to the opponent unchanged (keeps _mid so clients
+      // can de-duplicate against the same message arriving over WebRTC)
+      if ((type === 'player-pos' || type === 'answer-submitted' || type === 'pearl-collected') && currentRoomId) {
         const room = rooms.get(currentRoomId);
         if (room) {
-          broadcastToRoom(room, {
-            type: 'opponent-pos',
-            playerSlot,
-            x: msg.x,
-            y: msg.y,
-            facingRight: msg.facingRight,
-            isShocked: msg.isShocked
-          }, ws);
+          broadcastToRoom(room, msg, ws);
         }
       }
 

@@ -30,7 +30,7 @@ interface GameplayPageProps {
   onExitGame: () => void;
   onFinishGame: (finalP1: PlayerStats, finalP2: PlayerStats, isGameOver?: boolean) => void;
   broadcastEvent?: (msg: any) => void;
-  incomingMultiplayerEvent?: any;
+  subscribeMultiplayerEvents?: (handler: (msg: any) => void) => () => void;
 }
 
 export const GameplayPage: React.FC<GameplayPageProps> = ({
@@ -42,7 +42,7 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
   onExitGame,
   onFinishGame,
   broadcastEvent,
-  incomingMultiplayerEvent
+  subscribeMultiplayerEvents
 }) => {
   const zoneConfig = ZONE_CONFIGS[currentLevel] || ZONE_CONFIGS[1];
   const arenaRef = useRef<HTMLDivElement>(null);
@@ -370,36 +370,56 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
     };
   }, [currentLevel, targetCount, questions, gameMode]);
 
-  // Synchronize incoming multiplayer events
+  // Keep the opponent's identity in sync with the room info
   useEffect(() => {
-    if (!incomingMultiplayerEvent) return;
-    const msg = incomingMultiplayerEvent;
+    if (!p2Profile) return;
+    p2Ref.current.name = p2Profile.name || p2Ref.current.name;
+    p2Ref.current.avatar = p2Profile.avatar || p2Ref.current.avatar;
+  }, [p2Profile?.name, p2Profile?.avatar]);
 
-    if (msg.type === 'opponent-pos') {
-      p2Ref.current.x = msg.x;
-      p2Ref.current.y = msg.y;
-      p2Ref.current.facingRight = msg.facingRight;
-      p2Ref.current.isShocked = msg.isShocked;
-    } else if (msg.type === 'scores-updated') {
-      p1Ref.current.score = msg.p1Score;
-      p2Ref.current.score = msg.p2Score;
-      setHudScores({ p1: msg.p1Score, p2: msg.p2Score });
-    } else if (msg.type === 'bubble-popped-broadcast') {
-      const bubble = bubblesRef.current.find(b => b.id === msg.bubbleId);
-      if (bubble) {
-        bubble.active = false;
-        setBubbles([...bubblesRef.current]);
+  const onFinishGameRef = useRef(onFinishGame);
+  onFinishGameRef.current = onFinishGame;
+
+  // Synchronize incoming multiplayer events (p2Ref always = the opponent on this device)
+  useEffect(() => {
+    if (gameMode !== 'multi' || !subscribeMultiplayerEvents) return;
+
+    return subscribeMultiplayerEvents((msg: any) => {
+      const p2 = p2Ref.current;
+
+      // 'player-pos' arrives raw via WebRTC / BroadcastChannel / WS relay, 'opponent-pos' from older servers
+      if (msg.type === 'player-pos' || msg.type === 'opponent-pos') {
+        if (typeof msg.x === 'number') p2.x = msg.x;
+        if (typeof msg.y === 'number') p2.y = msg.y;
+        p2.facingRight = !!msg.facingRight;
+        p2.isShocked = !!msg.isShocked;
+      } else if (msg.type === 'answer-submitted') {
+        if (typeof msg.score === 'number') p2.score = msg.score;
+        if (typeof msg.correct === 'number') p2.correct = msg.correct;
+        if (typeof msg.wrong === 'number') p2.wrong = msg.wrong;
+        setHudScores({ p1: p1Ref.current.score, p2: p2.score });
+      } else if (msg.type === 'pearl-collected' || msg.type === 'pearl-collected-broadcast') {
+        const pearl = pearlsRef.current.find(p => p.id === msg.pearlId);
+        if (pearl && pearl.active) {
+          pearl.active = false;
+          setPearls([...pearlsRef.current]);
+        }
+        if (typeof msg.score === 'number') {
+          p2.score = msg.score;
+          if (typeof msg.pearls === 'number') p2.pearls = msg.pearls;
+          setHudScores({ p1: p1Ref.current.score, p2: p2.score });
+        }
+      } else if (msg.type === 'bubble-popped-broadcast') {
+        const bubble = bubblesRef.current.find(b => b.id === msg.bubbleId);
+        if (bubble) {
+          bubble.active = false;
+          setBubbles([...bubblesRef.current]);
+        }
+      } else if (msg.type === 'match-ended') {
+        onFinishGameRef.current(p1Ref.current, p2Ref.current, false);
       }
-    } else if (msg.type === 'pearl-collected-broadcast') {
-      const pearl = pearlsRef.current.find(p => p.id === msg.pearlId);
-      if (pearl) {
-        pearl.active = false;
-        setPearls([...pearlsRef.current]);
-      }
-    } else if (msg.type === 'match-ended') {
-      onFinishGame(p1Ref.current, p2Ref.current, false);
-    }
-  }, [incomingMultiplayerEvent, onFinishGame]);
+    });
+  }, [gameMode, subscribeMultiplayerEvents]);
 
   // Handle Shock on Jellyfish collision
   const triggerShock = useCallback((player: PlayerStats) => {
@@ -450,7 +470,9 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
         type: 'answer-submitted',
         isCorrect,
         points,
-        p1Score: p1.score
+        score: p1.score,
+        correct: p1.correct,
+        wrong: p1.wrong
       });
     }
 
@@ -558,7 +580,9 @@ export const GameplayPage: React.FC<GameplayPageProps> = ({
             if (gameMode === 'multi' && broadcastEvent) {
               broadcastEvent({
                 type: 'pearl-collected',
-                pearlId: pearl.id
+                pearlId: pearl.id,
+                score: p1.score,
+                pearls: p1.pearls
               });
             }
           }
